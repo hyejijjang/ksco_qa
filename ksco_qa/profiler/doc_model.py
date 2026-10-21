@@ -197,16 +197,39 @@ def _label_cell(value: str) -> str | None:
 class RowLabels:
     columns: list[int]  # 라벨을 얻은 열 (0부터, 많이 쓴 순)
     header: str
-    values: list[str]  # 중복 제거, 합계 줄 제외
+    values: list[str]  # 중복 제거, 합계 줄 제외. 번호 체계가 있으면 상위 단계부터
     skipped: list[str]  # 예: ["1열 연번", "2열 날짜", "1열 번호"]
     has_total: bool = False
+    top_level_count: int | None = None  # 번호 체계가 있는 표: 최상위 단계 라벨 수 (없으면 None)
+    top_level: int | None = None  # 최상위 단계 (보통 1)
+
+    @property
+    def leveled(self) -> bool:
+        return self.top_level_count is not None
+
+    def columns_desc(self) -> str:
+        cols = ranges(sorted(c + 1 for c in set(self.columns)))
+        text = f"{cols}열({self.header})"
+        return text + (f", {'·'.join(self.skipped)}" if self.skipped else "")
 
     def describe(self) -> str:
         if not self.skipped and self.columns[:1] == [0] and len(set(self.columns)) == 1:
             return "첫 열"
-        cols = ranges(sorted(c + 1 for c in set(self.columns)))
-        text = f"행 라벨: {cols}열({self.header})"
-        return text + (f", {'·'.join(self.skipped)}" if self.skipped else "")
+        return f"행 라벨: {self.columns_desc()}"
+
+
+def numbering_level(text: str) -> int | None:
+    """번호 단계: Ⅰ.·Ⅱ. = 1, 1.·2. = 2, (1)·(2) = 3, 가.·(가)·① = 4."""
+    s = text.strip()
+    if re.match(r"^([ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩⅪⅫ]+|[IVX]+\s*\.)", s):
+        return 1
+    if re.match(r"^\(\s*\d+\s*\)", s):
+        return 3
+    if re.match(r"^\d+\s*[.)]", s):
+        return 2
+    if re.match(r"^([가-하]\s*[.)]|\(\s*[가-하]\s*\)|[①-⑳])", s):
+        return 4
+    return None
 
 
 def row_labels(t: DocTable) -> RowLabels:
@@ -230,36 +253,68 @@ def row_labels(t: DocTable) -> RowLabels:
             # (재무표에서 상위 과목 "매출액"이 하위 번호 "1."들과 같은 열에 있는 경우)은 살린다
             skip_cols.add(j)
         skipped.append(f"{j + 1}열 {kind}")
-    values, used, has_total = [], [], False
+
+    found: list[tuple[str, int | None, int]] = []  # (이름, 번호 단계, 열)
+    has_total = False
     for row in t.rows[layout.data_start:]:
+        level = None
         for j, cell in enumerate(row):
+            text = cell_text(cell)
+            if level is None and text and BARE_NUMBERING_RE.match(text):
+                level = numbering_level(text)  # 번호만 있는 칸 (예: "Ⅰ." | "유동자산")
             if j in skip_cols:
                 continue
-            name = _label_cell(cell_text(cell))
+            name = _label_cell(text)
             if name is None:
                 continue
+            if level is None and NUMBERING_PREFIX_RE.match(text):
+                level = numbering_level(text)  # 번호가 붙은 이름 (예: "Ⅰ. 유동자산")
             if TOTAL_ROW_RE.search(re.sub(r"\s+", "", name)):
                 has_total = True
             else:
-                values.append(name)
-                used.append(j)
+                found.append((name, level, j))
             break
+
+    top_count, top_level = None, None
+    present = {level for _, level, _ in found if level is not None}
+    if len(present) >= 2:  # 번호 단계가 둘 이상일 때만 계층으로 본다 (①②만 있는 목록은 원래 순서)
+        # 번호가 없는 행은 같은 열에 놓인 번호 있는 행의 단계로 추정, 추정이 안 되면 맨 아래 단계
+        by_col: dict[int, Counter] = {}
+        for _, level, j in found:
+            if level is not None:
+                by_col.setdefault(j, Counter())[level] += 1
+        deepest = max(level for _, level, _ in found if level is not None)
+        resolved = [(name, level if level is not None else
+                     (by_col[j].most_common(1)[0][0] if j in by_col else deepest), j) for name, level, j in found]
+        ordered = sorted(enumerate(resolved), key=lambda x: (x[1][1], x[0]))  # 단계 → 원래 순서
+        values = list(dict.fromkeys(name for _, (name, _, _) in ordered))
+        top_level = min(present)
+        top_count = len(dict.fromkeys(name for name, level, _ in resolved if level == top_level))
+    else:
+        values = list(dict.fromkeys(name for name, _, _ in found))
+    used = [j for _, _, j in found]
     counts = Counter(used)
     columns = [c for c, _ in counts.most_common()] or [0]
     main = columns[0]
     # 머리글 행이 병합으로 칸 수가 모자라면 열 번호가 맞지 않으므로 첫 머리글 칸(보통 "과 목"·"구 분")을 쓴다
     aligned = len(header_row) == t.n_cols
-    header = header_text(header_row[main] if aligned and main < len(header_row) else (header_row[0] if header_row else ""))
-    return RowLabels(columns, header, list(dict.fromkeys(values)), skipped, has_total)
+    header = header_text(header_row[main]) if aligned and main < len(header_row) else ""
+    if not header:  # 병합으로 비었으면 첫 머리글 칸
+        header = header_text(header_row[0]) if header_row else ""
+    return RowLabels(columns, header, values, skipped, has_total, top_count, top_level)
 
 
 def labels_line(t: DocTable, limit: int, indent: str = "  ") -> str | None:
     labels = row_labels(t)
     if not labels.values and not labels.has_total:
         return None
-    shown = labels.values[:limit]
+    # 번호 체계가 있으면 1단계는 개수 제한과 상관없이 전부, 남는 자리를 하위 단계로 채운다
+    shown = labels.values[:max(limit, labels.top_level_count or 0)]
     more = f" 외 {len(labels.values) - len(shown)}개" if len(labels.values) > len(shown) else ""
     total = " · 합계 행 있음" if labels.has_total else ""
+    if labels.leveled:
+        return (f"{indent}행 라벨(상위 우선): {labels.columns_desc()} · {labels.top_level}단계 {labels.top_level_count}개 / "
+                f"전체 {len(labels.values)}개: {', '.join(shown)}{more}{total}")
     return f"{indent}{labels.describe()}({len(labels.values)}): {', '.join(shown)}{more}{total}"
 
 
@@ -334,6 +389,23 @@ def render_detail_table(t: DocTable, no: int, data_rows: int, label_max: int, be
 
 
 BRIEF_TITLE_CHARS = 30
+TITLE_LOOKBACK = 3
+TABLE_TITLE_RE = re.compile(
+    r"^\s*(\(\s*\d+\s*\)|\d+\s*\.|[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩⅪⅫ]+\s*\.|[가-하]\s*\.)|(표|계산서|명세서)\s*$"
+)
+PERIOD_LINE_RE = re.compile(r"부터.*까지|현재\s*\)?\s*$|기준\s*\)?\s*$")
+
+
+def table_title(model: "DocModel", t: DocTable) -> str | None:
+    """비상세 표 제목: 위로 최대 3문단 안에서 제목 패턴((1)·1.·Ⅰ.·가., "~표"·"~계산서"·"~명세서")에 맞는
+    가장 가까운 문단. 기간·기준일 줄("~부터 ~까지", "~현재")은 건너뛴다."""
+    for i in range(t.after_paragraph, max(t.after_paragraph - TITLE_LOOKBACK, 0), -1):
+        text = model.paragraphs[i - 1].strip()
+        if PERIOD_LINE_RE.search(text):
+            continue
+        if TABLE_TITLE_RE.search(text):
+            return text
+    return None
 
 
 def _brief_mode(brief: object) -> str:
@@ -344,7 +416,7 @@ def _brief_mode(brief: object) -> str:
 
 
 def render_brief_table(t: DocTable, no: int, brief: object, title: str | None = None) -> str:
-    """비상세 표 한 줄: "표k R×C · <앞 문단 30자> · 머리글: …"."""
+    """비상세 표 한 줄: "표k R×C · <표 제목 30자> · 머리글: …"."""
     mode = _brief_mode(brief)
     parts = [f"표{no} {t.n_rows}×{t.n_cols}"]
     if title:
@@ -398,7 +470,7 @@ def render(model: DocModel, detail: set[int], brief: object, data_rows: int, par
             t = model.tables[j]
             before = model.paragraphs[t.after_paragraph - 1] if t.after_paragraph else None
             if j not in detail:
-                lines.append(render_brief_table(t, j + 1, mode, before if brief_title else None))
+                lines.append(render_brief_table(t, j + 1, mode, table_title(model, t) if brief_title else None))
                 continue
             duplicate = bool(keys[j]) and keys.count(keys[j]) > 1
             lines.extend(render_detail_table(t, j + 1, data_rows, label_max, before, duplicate))
@@ -413,8 +485,8 @@ def render(model: DocModel, detail: set[int], brief: object, data_rows: int, par
 
 def _brief_desc(model: DocModel, others: list[int], mode: str, brief_title: bool) -> str:
     parts = ["크기"]
-    if brief_title and any(model.tables[j].after_paragraph for j in others):
-        parts.append("앞 문단 30자")
+    if brief_title and any(table_title(model, model.tables[j]) for j in others):
+        parts.append("표 제목 30자")
     shortened = mode == "short" and any(
         len(model.tables[j].rows[table_layout(model.tables[j]).header]) > HEADER_SHORT_CELLS for j in others)
     if mode == "full" or (mode == "short" and not shortened):

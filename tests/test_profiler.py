@@ -322,9 +322,55 @@ def test_title_rows_and_header_continuation() -> None:
     assert (layout.title_rows, layout.header, layout.data_start) == ([0], 1, 3)
     assert layout.title_text(t) == "가상공사 (단위 : 원)"
     labels = row_labels(t)
-    assert labels.values == ["자산", "유동자산", "당좌자산", "현금및현금성자산", "단기금융상품", "비유동자산"]
-    assert labels.has_total
+    # 상위 우선: 1단계(Ⅰ.) → 2단계(1.) → 3단계((1)). "자산"은 번호가 없어 같은 열(3열)의 2단계로 추정
+    assert labels.values == ["유동자산", "비유동자산", "자산", "현금및현금성자산", "단기금융상품", "당좌자산"]
+    assert labels.has_total and (labels.top_level, labels.top_level_count) == (1, 2)
     assert labels.describe().startswith("행 라벨: 1-3열(과        목)")
+
+
+@pytest.mark.parametrize("text, level", [
+    ("Ⅰ.", 1), ("Ⅱ. 매출원가", 1), ("IV.", 1), ("1.", 2), ("12) 기타", 2), ("(1)", 3), ("( 2 ) 당좌자산", 3),
+    ("가.", 4), ("(나)", 4), ("①", 4), ("유동자산", None),
+])
+def test_numbering_level(text: str, level: int | None) -> None:
+    from ksco_qa.profiler.doc_model import numbering_level
+
+    assert numbering_level(text) == level
+
+
+def test_top_level_labels_first_and_all_shown() -> None:
+    """상위 우선: 1단계 전부 → 2단계 …, 같은 단계는 원래 순서. 1단계는 개수 제한을 넘어도 전부."""
+    from ksco_qa.profiler.doc_model import DocTable, labels_line
+
+    rows = [["과 목", "", "당기", "전기"]]
+    for i, top in enumerate(["매출액", "매출원가", "매출총이익", "판매비와관리비", "영업이익",
+                             "영업외수익", "영업외비용", "법인세차감전순이익", "법인세비용", "당기순이익"]):
+        rows.append([f"{'ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ'[i]}.", top, "1,000", "900"])
+        rows.append(["", f"1. {top} 세부", "100", "90"])
+    line = labels_line(DocTable(rows, 0), 8)
+    assert line.startswith("  행 라벨(상위 우선): 2열(과 목), 1열 번호 · 1단계 10개 / 전체 20개: 매출액, 매출원가,")
+    assert "영업이익" in line and "당기순이익 외 10개" in line and "세부" not in line
+
+
+def test_single_level_numbering_keeps_original_order() -> None:
+    from ksco_qa.profiler.doc_model import DocTable, row_labels
+
+    rows = [["구분", "내용"], ["① 접수", "a"], ["② 검토", "b"], ["③ 결재", "c"]]
+    labels = row_labels(DocTable(rows, 0))
+    assert labels.values == ["접수", "검토", "결재"] and not labels.leveled
+
+
+def test_brief_table_title_lookup() -> None:
+    """비상세 표 제목: 위로 최대 3문단 안 제목 패턴, 기간·기준일 줄은 건너뜀."""
+    from ksco_qa.profiler.doc_model import DocModel, DocTable, table_title
+
+    paragraphs = ["(2) 손익계산서", "손익계산서", "당기(제21기) 2024년 1월 1일부터 2024년 12월 31일까지",
+                  "전기(제20기) 2023년 1월 1일부터 2023년 12월 31일까지", "본문 설명", "(단위 : 원)", "2024년 12월 31일 현재"]
+    t1, t2, t3 = DocTable([["a", "b"], ["c", "d"]], 4), DocTable([["a", "b"], ["c", "d"]], 7), DocTable([["a"]], 0)
+    m = DocModel("HWPX", "제목", paragraphs, [t1, t2, t3])
+    assert table_title(m, t1) == "손익계산서"  # 기간 줄 2개를 건너뛰고 "~계산서"
+    assert table_title(m, t2) is None  # 3문단 안에 제목 패턴 없음
+    assert table_title(m, t3) is None
 
 
 def test_numbering_column_and_full_span_title() -> None:

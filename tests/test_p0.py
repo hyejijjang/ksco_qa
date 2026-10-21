@@ -143,6 +143,12 @@ def test_extension_mismatch_in_mapping_audit(p0) -> None:
     assert "EXTENSION_MISMATCH" in row["warnings"].split("; ")
 
 
+def test_profile_budget_from_config(sample_task: Path, tmp_path: Path) -> None:
+    result = run_p0(sample_task, Config(PROFILE_MAX_CHARS=400), tmp_path / "run", tmp_path / "a.csv")
+    sizes = [len(c["file_profile"]) for c in result.row_cards if c["file_profile"]]
+    assert sizes and max(sizes) <= 400
+
+
 def test_all_profiles_within_budget(p0) -> None:
     for card in p0[0].row_cards:
         assert card["file_profile"] is None or len(card["file_profile"]) <= 1500

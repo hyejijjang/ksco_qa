@@ -42,6 +42,7 @@ def test_defaults_match_design_10_2(tmp_path: Path) -> None:
     assert cfg.G1_TARGET_CANDS == (3, 8)
     assert cfg.G1_PAIRS_PER_CALL == 40
     assert cfg.NOT_FOUND_STOP_RATIO == 0.30
+    assert cfg.PROFILE_MAX_CHARS == 1500
     assert (cfg.PRICE_INPUT, cfg.PRICE_CACHED_INPUT, cfg.PRICE_OUTPUT) == (None, None, None)
     assert cfg.BUDGET_USD is None
     assert cfg.MODE == "online"
@@ -74,6 +75,7 @@ def test_yaml_on_is_true(tmp_path: Path) -> None:
         {"G1_PAIRS_PER_CALL": 41},
         {"G1_TARGET_CANDS": [8, 3]},
         {"NOT_FOUND_STOP_RATIO": 1.5},
+        {"PROFILE_MAX_CHARS": 50},
     ],
 )
 def test_invalid_values_rejected(tmp_path: Path, data: dict) -> None:

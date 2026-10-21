@@ -415,8 +415,8 @@ def classify_reference(e_value: Any) -> tuple[str, str | None]:
 # --- 10. 파일 프로필 ---
 
 
-def profile_matched(match: MatchResult, cache_dir: Path) -> list[FileProfile]:
-    budget = row_budget(match.matched_locators)
+def profile_matched(match: MatchResult, cache_dir: Path, total_budget: int) -> list[FileProfile]:
+    budget = row_budget(match.matched_locators, total_budget)
     profiles = []
     for e in match.matched:
         if e.in_zip:
@@ -509,7 +509,7 @@ def run_p0(task_folder: Path, cfg: Config, run_dir: Path, mapping_audit_path: Pa
     cache_dir = run_dir / "file_profiles"
     row_cards, records, audit = [], [], []
     for row, match in zip(datalist.rows, matches):
-        profiles = profile_matched(match, cache_dir) if match.match_status == "MATCHED" else []
+        profiles = profile_matched(match, cache_dir, cfg.PROFILE_MAX_CHARS) if match.match_status == "MATCHED" else []
         inspected = match.match_status == "MATCHED" and bool(profiles) and all(p.inspected for p in profiles)
         reference = classify_reference(row.values.get("E"))
         file_profile = combine_for_row(profiles) if profiles else None

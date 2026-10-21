@@ -57,6 +57,8 @@ class Config(BaseModel):
     G1_TARGET_CANDS: tuple[int, int] = (3, 8)
     G1_PAIRS_PER_CALL: int = Field(default=40, ge=1, le=40)  # CLAUDE.md 원칙 3: ≤40쌍
     NOT_FOUND_STOP_RATIO: float = Field(default=0.30, ge=0.0, le=1.0)
+    # row_card.file_profile 예산 (행당 글자 수, 설계 7.1·부록 B). 파일이 여럿이면 나눠 쓴다
+    PROFILE_MAX_CHARS: int = Field(default=1500, ge=200)
 
     # 단가 USD / 1M 토큰 — 결정 필요 (14장 #1)
     PRICE_INPUT: float | None = Field(default=None, ge=0)
