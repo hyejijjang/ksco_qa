@@ -10,7 +10,7 @@
 스캔 여부 = 텍스트가 거의 없는 쪽 비율. 관찰 위치는 프로필에 실제로 담은 범위만 적는다.
 
 1,500자를 넘으면: 상세 쪽 밖 표 머리글 앞 3칸 → 데이터 행 2→1 → 첫 줄 5→3→1 → 행 라벨 15→8
-→ 상세 쪽 수(맨 마지막, 우선순위 낮은 쪽부터). 쪽 수, 표 개수·크기·쪽 위치, 상세 쪽 표 머리글, 관찰 위치는 줄이지 않는다.
+→ 행 라벨 1단계 전부+하위 3개 → 상세 쪽 수(맨 마지막, 우선순위 낮은 쪽부터). 쪽 수, 표 개수·크기·쪽 위치, 상세 쪽 표 머리글, 관찰 위치는 줄이지 않는다.
 """
 
 from __future__ import annotations
@@ -24,6 +24,9 @@ from ksco_qa.profiler.doc_model import (
     FIRST_COL_MAX,
     FIRST_COL_REDUCED,
     HEADER_SHORT_CELLS,
+    LABELS_TOP_PLUS,
+    label_cap_desc,
+    row_labels,
     DocTable,
     data_rows_lines,
     is_pdf_layout_cell,
@@ -107,14 +110,16 @@ class PdfModel:
         return list(dict.fromkeys([1, mid, n, 2, mid + 1, n - 1]))
 
     def fit_to(self, budget: int) -> tuple[str, list[str]]:
-        """비상세 쪽 머리글 3칸 → 데이터 행 2→1 → 첫 줄 5→3→1 → 행 라벨 15→8 → 상세 쪽 수(맨 마지막)."""
+        """비상세 쪽 머리글 3칸 → 데이터 행 2→1 → 첫 줄 5→3→1 → 행 라벨 15→8 → 행 라벨 1단계 전부+하위 3개
+        → 상세 쪽 수(맨 마지막)."""
         priority = self.detail_priority()
         n = len(priority)
         steps = [
             (n, False, 2, 5, FIRST_COL_MAX), (n, True, 2, 5, FIRST_COL_MAX), (n, True, 1, 5, FIRST_COL_MAX),
             (n, True, 1, 3, FIRST_COL_MAX), (n, True, 1, 1, FIRST_COL_MAX), (n, True, 1, 1, FIRST_COL_REDUCED),
+            (n, True, 1, 1, LABELS_TOP_PLUS),
         ]
-        steps += [(k, True, 1, 1, FIRST_COL_REDUCED) for k in range(n - 1, 0, -1)]
+        steps += [(k, True, 1, 1, LABELS_TOP_PLUS) for k in range(n - 1, 0, -1)]
         text, locations = "", []
         for k, short, rows, first_lines, labels in steps:
             text, locations = render(self, set(priority[:k]), short, rows, first_lines, labels)
@@ -144,7 +149,7 @@ def _table_brief(m: PdfModel, j: int, short: bool, with_title: bool = False) -> 
 
 
 def render(m: PdfModel, detail: set[int], short_headers: bool, data_rows: int, first_lines: int,
-           label_max: int = FIRST_COL_MAX) -> tuple[str, list[str]]:
+           label_max: int | str = FIRST_COL_MAX) -> tuple[str, list[str]]:
     sparse = sum(p.sparse for p in m.pages)
     scan = " → 스캔 PDF로 보임(텍스트 판독 불가)" if m.checked and sparse / m.checked >= SCAN_RATIO else ""
     unchecked = f" (p{m.checked + 1}-p{m.n_pages} 미확인)" if m.checked < m.n_pages else ""
@@ -156,8 +161,11 @@ def render(m: PdfModel, detail: set[int], short_headers: bool, data_rows: int, f
     locations = []
     if detail:
         has_tables = any(t.page in detail for t in m.tables)
+        cap = label_max
+        if cap == LABELS_TOP_PLUS and not any(row_labels(t.table).leveled for t in m.tables if t.page in detail):
+            cap = FIRST_COL_REDUCED  # 번호 체계 있는 표가 없으면 실제 상한은 그대로 8개
         locations.append(f"p{ranges(sorted(detail))} 상세(첫 {first_lines}줄·금액 범위·합계 줄·단위/기준일"
-                         + (f", 표 크기·머리글·행 라벨 최대 {label_max}개·앞 {data_rows}행" if has_tables else "") + ")")
+                         + (f", 표 크기·머리글·{label_cap_desc(cap)}·앞 {data_rows}행" if has_tables else "") + ")")
     if others:
         locations.append(f"p{ranges(others)} 첫 줄" + (", 표 크기·머리글" if any(t.page not in detail for t in m.tables) else "")
                          + (" (머리글 앞 3칸)" if shortened else ""))

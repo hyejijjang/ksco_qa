@@ -192,7 +192,7 @@ def test_pdf_table_extracted_with_serial_column(tmp_path: Path) -> None:
     p = prof(tmp_path / "t.pdf")
     assert "표 1개" in p.text and "레이아웃 칸" not in p.text
     assert "p1 상세: Card usage\n  표1 4×3 · 머리글: No | Place | Amount" in p.text
-    assert "표1 행 라벨: 2열(Place), 1열 연번(3): Cafe A, Hall B, Shop C" in p.text
+    assert "표1 행 라벨: 2열, 1열 연번(3): Cafe A, Hall B, Shop C" in p.text
     assert "표1 2행: 1 | Cafe A | 144,000" in p.text and "표1 3행: 2 | Hall B | 22,300" in p.text
     assert "표1 4행" not in p.text  # 데이터 앞 2행만
     assert "금액 범위 22,300~462,000" in p.text
@@ -256,7 +256,7 @@ def test_row_labels_skip_serial_and_date_up_to_third_column() -> None:
     rows = [["연번", "일시", "장소", "금액"], ["1", "2026-09-02 12:00", "식당A", "1,000"], ["2", "2026-09-01", "식당B", "2,000"]]
     labels = row_labels(DocTable(rows, 0))
     assert (labels.columns[0], labels.values) == (2, ["식당A", "식당B"])
-    assert labels.describe() == "행 라벨: 3열(장소), 1열 연번·2열 날짜"
+    assert labels.describe() == "행 라벨: 3열, 1열 연번·2열 날짜"
     rows = [["번호", "일자", "일시"], ["1", "2026-01-01", "2026-01-02"]]
     assert row_labels(DocTable(rows, 0)).values == []  # 3번째 열까지 모두 연번·날짜 → 라벨 없음
     rows = [["과 목", "금액"], ["자산", "1"], ["부채", "2"]]
@@ -273,7 +273,7 @@ def test_xlsx_row_labels(tmp_path: Path) -> None:
         ws.append([i, name, i * 100])
     wb.save(tmp_path / "s.xlsx")
     p = prof(tmp_path / "s.xlsx")
-    assert "행 라벨: 2열(기관), 1열 연번(3): 가기관, 나기관, 다기관 (머리글 1행 기준)" in p.text
+    assert "행 라벨: 2열, 1열 연번(3): 가기관, 나기관, 다기관 (머리글 1행 기준)" in p.text
 
 
 def test_odt_table(tmp_path: Path) -> None:
@@ -325,7 +325,7 @@ def test_title_rows_and_header_continuation() -> None:
     # 상위 우선: 1단계(Ⅰ.) → 2단계(1.) → 3단계((1)). "자산"은 번호가 없어 같은 열(3열)의 2단계로 추정
     assert labels.values == ["유동자산", "비유동자산", "자산", "현금및현금성자산", "단기금융상품", "당좌자산"]
     assert labels.has_total and (labels.top_level, labels.top_level_count) == (1, 2)
-    assert labels.describe().startswith("행 라벨: 1-3열(과        목)")
+    assert labels.describe().startswith("행 라벨: 1-3열")
 
 
 @pytest.mark.parametrize("text, level", [
@@ -348,7 +348,7 @@ def test_top_level_labels_first_and_all_shown() -> None:
         rows.append([f"{'ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ'[i]}.", top, "1,000", "900"])
         rows.append(["", f"1. {top} 세부", "100", "90"])
     line = labels_line(DocTable(rows, 0), 8)
-    assert line.startswith("  행 라벨(상위 우선): 2열(과 목), 1열 번호 · 1단계 10개 / 전체 20개: 매출액, 매출원가,")
+    assert line.startswith("  행 라벨(상위 우선): 2열, 1열 번호 · 1단계 10/20: 매출액, 매출원가,")
     assert "영업이익" in line and "당기순이익 외 10개" in line and "세부" not in line
 
 
@@ -381,8 +381,8 @@ def test_numbering_column_and_full_span_title() -> None:
     assert table_layout(t).header == 1
     labels = row_labels(t)
     assert labels.values == ["인건비", "운영비"] and labels.has_total
-    assert labels.describe() == "행 라벨: 2열(과목), 1열 연번"
-    assert labels_line(t, 15) == "  행 라벨: 2열(과목), 1열 연번(2): 인건비, 운영비 · 합계 행 있음"
+    assert labels.describe() == "행 라벨: 2열, 1열 연번"
+    assert labels_line(t, 15) == "  행 라벨: 2열, 1열 연번(2): 인건비, 운영비 · 합계 행 있음"
     numbered = DocTable([["구분", "금액"], ["가.", "10"], ["나.", "20"], ["다.", "30"], ["라.", "40"], ["", "50"]], 0)
     assert row_labels(numbered).skipped == ["1열 번호"]
 
@@ -416,7 +416,7 @@ def test_hwpx_card_profile(tmp_path: Path) -> None:
     assert p.inspected_locations == ["문단 1-11 (각 80자)", "표1-4 머리글·행 라벨·앞 2행"]
     assert "문단 2: '26.03.31.현재" in t and "문단 4: (단위 : 매)" in t
     assert "표1 (문단 4 다음) 5행 × 2열\n  머리글: 구    분 | 수 량" in t  # 머리글 공백 원문 그대로
-    assert "첫 열(3): 본 사, 지역본부 계, 서울지역본부 · 합계 행 있음" in t  # 총 계는 합계 행
+    assert "첫 열(2): 본 사, 서울지역본부 · 합계 행 있음" in t  # 총 계·지역본부 계는 합계 행
     assert "표2 (문단 6 다음) 6행 × 2열 · 병합 셀 있음 · 앞 문단: ㅇ카드사용 의무적 제한 업종" in t
     assert "표3 (문단 8 다음) 3행 × 2열 · 앞 문단: ㅇ카드사용 금지 업종\n  머리글: 구   분 | 내      용" in t
     assert "표4 (문단 10 다음) 2행 × 2열 · 앞 문단: ㅇ카드사용 제한 업종" in t

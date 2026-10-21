@@ -243,7 +243,8 @@ class MockClient:
         reference_mode = _find_key(inp, "reference_mode")
         if reference_mode == "GENERATE_REFERENCE":
             out["reference_action"] = "GENERATE"
-        if reference_mode == "UNRESOLVED_REFERENCE":  # 00 6.2 기본값
+        if reference_mode == "UNRESOLVED_REFERENCE":  # 00 6.2 기본값 + 결정: action=CHECK_ACCESS
+            out["reference_action"] = "CHECK_ACCESS"
             out["reference_readiness"] = "HOLD"
         if reference_mode != "PROVIDED_REFERENCE":  # reference_conflict는 PROVIDED일 때만 (결정 29)
             out["reference_conflict"] = None

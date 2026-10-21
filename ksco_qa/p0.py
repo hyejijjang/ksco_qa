@@ -24,6 +24,8 @@ DATALIST_SUFFIX = "_DataList.xlsx"
 SHEET_NAME = "DataList"
 HEADER_ROW = 1
 OUTPUT_FILES_DIR = "01_output_files"
+# 여러 형식 행: 06 matched_locator는 문자열 하나라 경로를 " | "로 잇고, 전체 목록은 matched_locators[]에 둔다
+MATCHED_LOCATOR_SEP = " | "
 # 결정 3: B~I열만 검증 (설계 5.1-2의 7개 열)
 EXPECTED_HEADERS = {"B": "id", "C": "직업명", "D": "산출물", "E": "레퍼런스", "F": "출력포맷", "G": "태스크", "I": "직무정보"}
 DATA_COLUMNS = "BCDEFGHI"  # 교훈 #6: B~I 중 하나라도 값이 있으면 데이터 행
@@ -531,6 +533,7 @@ def run_p0(task_folder: Path, cfg: Config, run_dir: Path, mapping_audit_path: Pa
             "expected_filenames": match.expected_filenames,
             "match_status": match.match_status,
             "match_method": "D_F_EXACT_FILENAME" if match.match_status == "MATCHED" else None,
+            "matched_locator": MATCHED_LOCATOR_SEP.join(match.matched_locators) or None,
             "matched_locators": match.matched_locators,
             "inspected": inspected,
             "inspected_locations": locations,
@@ -547,7 +550,7 @@ def run_p0(task_folder: Path, cfg: Config, run_dir: Path, mapping_audit_path: Pa
             "format_F": _text(row.values.get("F")),
             "expected_filename": match.expected_filename,
             "match_status": match.match_status,
-            "matched_locator": "; ".join(match.matched_locators),
+            "matched_locator": MATCHED_LOCATOR_SEP.join(match.matched_locators),
             "inspected": inspected,
             "inspected_locations": "; ".join(locations),
             "reason": reason,

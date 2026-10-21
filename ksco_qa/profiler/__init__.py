@@ -97,7 +97,7 @@ def profile_file(path: Path, locator: str, cache_dir: Path | None, budget: int =
             result = FileProfile(locator, fmt, False, "", [], f"{type(e).__name__}: {_sanitize(str(e), path)}")
     if cache_path is not None:
         cache_path.parent.mkdir(parents=True, exist_ok=True)
-        data = result.to_dict() | {"locator": ""}
+        data = result.to_dict() | {"locator": None}  # 캐시는 내용 기준이라 위치를 두지 않는다
         cache_path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
     return result
 

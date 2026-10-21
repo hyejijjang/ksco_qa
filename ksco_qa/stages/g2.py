@@ -32,7 +32,7 @@ def validate_output(row_card: dict[str, Any], output: dict[str, Any]) -> tuple[l
       G0 값이 입력에 없는데 disagree가 있음, g0_value가 입력의 G0 값과 다름,
       new_value가 overlap_review.checks[indicator]와 다름, g0_value = new_value, 같은 지표 중복,
       G0 값과 checks가 다른 지표인데 disagree에 없음.
-    Reference (결정 1·29) → 오류: UNRESOLVED_REFERENCE인데 reference_readiness≠HOLD,
+    Reference (결정 1·29) → 오류: UNRESOLVED_REFERENCE인데 reference_action≠CHECK_ACCESS 또는 reference_readiness≠HOLD,
       PROVIDED_REFERENCE가 아닌데 reference_conflict가 true, reference_conflict=true인데 note 없음.
     Blueprint에 row_card에 없는 숫자 패턴 → 경고."""
     raise NotImplementedError

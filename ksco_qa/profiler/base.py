@@ -36,7 +36,7 @@ class ProfileError(Exception):
 
 @dataclass
 class FileProfile:
-    locator: str  # 01_output_files/ 기준 상대 경로 (ZIP 멤버면 "<zip>!/<멤버>")
+    locator: str | None  # 01_output_files/ 기준 상대 경로 (ZIP 멤버면 "<zip>!/<멤버>"), 캐시 파일에는 null
     format: str
     inspected: bool
     text: str  # 관찰 위치 포함, 예산 이내

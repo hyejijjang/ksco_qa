@@ -46,7 +46,7 @@ P0
 - 관찰 위치에는 프로필에 실제로 담은 범위만 적는다. 읽기만 하고 담지 않은 범위를 "전체"로 적지 않는다 (문서형·PDF·PPTX).
 - 문서형(HWPX·DOCX·ODT): 제목, 본문 문단 순서대로 앞 80자. 레이아웃 칸(1열 표 또는 1행 표, 단 칸 절반 이상이 숫자인 1행 표는 데이터 표, 2열 이상 여러 행 표는 데이터 표)은 표에서 빼고 글자를 문단 흐름에 남김("레이아웃 칸 N개 제외"). 제목에서 연속 반복 문구는 한 번만. 상세 표 = 셀 수가 큰 표부터(위치·크기·제목 행·머리글·행 라벨·데이터 앞 2행), 나머지 표는 "표k R×C · <표 제목 30자> · 머리글: …" 한 줄(표 제목 = 위로 최대 3문단 안 제목 패턴 문단, 기간·기준일 줄 건너뜀), 상세 표 앞뒤 문단은 꼭 담음. 초과 시 비상세 표 머리글 3칸 → 데이터 행 2→1 → 문단 80→40자 → 행 라벨 15→8 → 비보호 문단 → 비상세 표 머리글 생략(크기만) → 비상세 표 앞 문단 제목 생략 → 상세 표 수 → 끝 줄부터(관찰 위치에 "이후 생략"). 확장자가 zip 기반(hwpx·docx·xlsx·pptx·odt·ods)인데 zip이 아니면 NOT_INSPECTED + 경고 EXTENSION_MISMATCH(mapping_audit warnings). 원본 파일 교체 여부는 사람이 판단.
 - PDF는 pdfplumber(pymupdf·pypdf 대체, VC++ 재배포 패키지 없이 동작 확인): 쪽 수, 스캔 여부. "행 4 이하·열 2 이하", "1열", "1행(숫자 절반 이상이면 예외)" 표는 레이아웃 칸으로 빼고(글자는 쪽 텍스트에 남김) "레이아웃 칸 N개 제외". 쪽 줄 "pN: 첫 줄(제목) · 표k R×C · 머리글: …"(표 크기는 한 번만), 첫 줄이 머리글 줄이면 "(pM 표 이어짐)". 상세 쪽 = 셀 수가 큰 표가 있는 쪽부터, 표가 이어진 쪽은 뒤로. 상세 쪽은 표 크기·머리글 전체, 첫 5줄·금액 범위·합계 줄·단위·기준일, 행 라벨·데이터 앞 2행. 초과 시 비상세 쪽 머리글 3칸 → 데이터 행 2→1 → 첫 줄 5→3→1 → 행 라벨 15→8 → 상세 쪽 수(맨 마지막). 쪽 수·표 개수·크기·쪽 위치·상세 쪽 표 머리글·관찰 위치는 줄이지 않는다.
-- 표 공통(PDF·HWPX·DOCX·ODT·XLSX): 머리글 행은 위에서부터 제목 행("단위" 포함·칸 절반 이상 빈칸·행 전체 병합)을 최대 3행 건너뛰고 찾는다(제목 행 내용은 표 줄에 남김). 첫 열부터 연번·날짜(2열부터)·번호 패턴(Ⅰ. (1) 1. 가. ①, 80% 이상) 열은 건너뛴다(최대 3번째 열, 아닌 열에서 멈춤, 번호 열은 번호만 있는 칸만 건너뛰고 같은 열의 상위 과목명은 살림). 행 라벨은 행마다 처음 나오는 이름 칸(빈칸·번호만·금액·날짜 칸 건너뜀, "Ⅰ. 유동자산"은 번호 떼기), 소계·합계·총계 줄은 빼고 "합계 행 있음". 프로필에 "행 라벨: N열(머리글), 1열 연번"처럼 적는다. 상위 과목 우선: 번호 단계(Ⅰ.=1, 1.=2, (1)=3, 가.·①=4, 번호 없는 행은 같은 열 단계로 추정·안 되면 맨 아래)가 둘 이상인 표는 1단계 전부(개수 제한 무시) → 2단계 → … 순서, "행 라벨(상위 우선): … · 1단계 N개 / 전체 M개". 단계가 없거나 하나뿐이면 원래 순서.
+- 표 공통(PDF·HWPX·DOCX·ODT·XLSX): 머리글 행은 위에서부터 제목 행("단위" 포함·칸 절반 이상 빈칸·행 전체 병합)을 최대 3행 건너뛰고 찾는다(제목 행 내용은 표 줄에 남김). 첫 열부터 연번·날짜(2열부터)·번호 패턴(Ⅰ. (1) 1. 가. ①, 80% 이상) 열은 건너뛴다(최대 3번째 열, 아닌 열에서 멈춤, 번호 열은 번호만 있는 칸만 건너뛰고 같은 열의 상위 과목명은 살림). 행 라벨은 행마다 처음 나오는 이름 칸(빈칸·번호만·금액·날짜 칸 건너뜀, "Ⅰ. 유동자산"은 번호 떼기), 소계·합계·총계 줄은 빼고 "합계 행 있음". 프로필에 "행 라벨: N열, 1열 연번"처럼 적는다. 상위 과목 우선: 번호 단계(Ⅰ.=1, 1.=2, (1)=3, 가.·①=4, 번호 없는 행은 같은 열 단계로 추정·안 되면 맨 아래)가 둘 이상인 표는 1단계 전부(개수 제한 무시) → 2단계 → … 순서, "행 라벨(상위 우선): 첫 열 · 1단계 2/23: …"(열 표시는 첫 열이면 "첫 열", 그 외 "N열"). 단계가 없거나 하나뿐이면 원래 순서. "~ 계"처럼 띄어 쓴 소계 행(지역본부 계)도 합계처럼 뺀다. 예산이 모자라면 상세 쪽·상세 표 수를 줄이기 직전에 행 라벨을 "1단계 전부 + 하위 3개"로.
 - HWP(구버전)는 NOT_INSPECTED. CSV 스트리밍 기준 20MB.
 - 부록 B에 추가: JSON(최상위 구조·키 목록·레코드 수·샘플), XML(루트·반복 요소·필드), HTML(제목 구조·표).
 
@@ -61,12 +61,18 @@ G3
 - 템플릿 감지 대상: G0 reason·issues, G1b evidence, G2 reason·issues·proposed_fix. 숫자, 해당 행의 job·job_leaf·deliverable_title, 따옴표·괄호 안 값, 공백을 지운 뒤 완전 일치로 비교.
 - overrides.jsonl 한 줄: {source_row, id, gate, field, old_value, new_value, reviewer, reason, decided_at}. 같은 (source_row, gate, field)는 마지막 줄이 이긴다.
 - review_queue 표본 시드 = hash(run_id), run_report에 기록.
+- UNRESOLVED_REFERENCE 행의 G2 기본값: reference_action=CHECK_ACCESS, reference_readiness=HOLD (코드 검증 대상).
+- 여러 형식 행의 source_assets.deliverable_files.matched_locator는 06대로 문자열 하나(경로를 " | "로 이음), 전체 목록은 추가 필드 matched_locators[]. mapping_audit의 matched_locator도 " | ".
 - 00 6.2의 CONFLICT: enum은 바꾸지 않고 G2 출력에 reference_conflict(bool, null 허용) + reference_conflict_note 추가. reference_mode=PROVIDED_REFERENCE일 때만 허용(1차 구현에서는 발생하지 않음). true면 reason_codes에 REFERENCE_CONFLICT, 최종은 Task FAIL이 아니라 REVIEW.
 
 프롬프트
 - 로더가 `<!-- -->` 주석을 지운다. prompt_version 해시는 실제로 보내는 텍스트 기준. g2.md는 G2_OVERLAP_MODE에 해당하는 섹션 하나만 보낸다.
 - g0.md의 "행별 기록"·"G0 저장" 문단, g2.md의 review_independence 문장과 SKIPPED 대상 글머리표 3개는 삭제.
 - FEEDBACK_HEADER: "직전 응답이 아래 검증 규칙을 위반했다. 입력은 같다. 아래 항목을 고친 전체 응답을 처음부터 다시 출력하라." 아래에 위반 항목을 "- job_evaluated가 'X'인데 이 행의 직업은 'Y'이다" 형식으로 나열.
+
+Work 결과 비교 (M5)
+- Work 결과는 별도 jsonl이 없다. compare 입력은 Work 결과 CSV(열: id, AI 판정, 최종 판정, Regenerate Task, 원본 Task(백업), 검수 메모) 또는 DataList.xlsx "DataList" 탭 R~V열(R=AI 판정, S=최종 판정, T=Regenerate Task, U=원본 Task(백업), V=검수 메모, id는 B열). 형식은 ksco_qa/compare.py load_work_result. 이 열들은 계속 row_card(모델 입력)에 넣지 않는다. 판정 값 어휘와 API 필드 대응은 M5에서 정한다.
+- 테스트는 tests/fixtures의 가상 샘플만 쓴다 (실제 work_result.csv·DataList는 저장소에 복사하지 않는다).
 
 개발 환경
 - 키(OPENAI_API_KEY)는 구현이 끝난 뒤에 넣는다. 개발·검증은 `--llm mock`(MockClient)으로 한다. mock run은 run_id가 `mock-`로 시작하고 산출물은 `_work/<run_id>/` 안에만 쓴다.
@@ -76,6 +82,7 @@ G3
 - `verify.reference_conflict`, `verify.reference_conflict_note`
 - `duplicate.candidate_pairs[]` (설계 7.4)
 - `final.execution_notes` (문자열)
+- `source_assets.deliverable_files.matched_locators[]` (여러 형식 행의 전체 경로 목록)
 
 ## 저장소 구조
 ```

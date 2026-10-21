@@ -41,6 +41,7 @@ NUMBERING_PREFIX_RE = re.compile(rf"^\s*{_NUMBERING}\s*")
 BARE_NUMBERING_RE = re.compile(rf"^\s*{_NUMBERING}\s*$")
 NUMERIC_CELL_RE = re.compile(r"^\s*\(?\s*[-−△▲]?\s*[\d,]+(\.\d+)?\s*\)?\s*%?\s*$|^\s*[-−]\s*$")
 TOTAL_ROW_RE = re.compile(r"(합\s*계|소\s*계|총\s*계)$|^계$|^total$|^subtotal$", re.I)
+SUBTOTAL_SUFFIX_RE = re.compile(r"\S\s+계$")  # "지역본부 계"처럼 띄어 쓴 "~ 계" (붙여 쓴 "회계"는 아님)
 
 
 @dataclass
@@ -49,6 +50,8 @@ class DocTable:
     after_paragraph: int  # 이 표 바로 앞의 (비어 있지 않은) 문단 번호, 0 = 문서 시작
     merged: bool = False
     full_span_rows: set[int] = field(default_factory=set)  # 한 칸이 행 전체에 병합된 행 (0부터)
+    # 머리글 위치·행 라벨 계산 결과 (축약하며 여러 번 다시 그리므로 표마다 한 번만 계산). 생성 후 rows는 바꾸지 않는다
+    _cache: dict = field(default_factory=dict, repr=False, compare=False)
 
     @property
     def n_rows(self) -> int:
@@ -130,6 +133,12 @@ class TableLayout:
 
 
 def table_layout(t: DocTable) -> TableLayout:
+    if "layout" not in t._cache:
+        t._cache["layout"] = _table_layout(t)
+    return t._cache["layout"]
+
+
+def _table_layout(t: DocTable) -> TableLayout:
     titles, i = [], 0
     while i < min(MAX_TITLE_ROWS, t.n_rows - 1) and is_title_row(t, i):
         titles.append(i)
@@ -208,14 +217,15 @@ class RowLabels:
         return self.top_level_count is not None
 
     def columns_desc(self) -> str:
-        cols = ranges(sorted(c + 1 for c in set(self.columns)))
-        text = f"{cols}열({self.header})"
+        """첫 열만 쓰면 "첫 열", 그 외는 "N열" (+ 건너뛴 열)."""
+        if not self.skipped and self.columns[:1] == [0] and len(set(self.columns)) == 1:
+            return "첫 열"
+        text = f"{ranges(sorted(c + 1 for c in set(self.columns)))}열"
         return text + (f", {'·'.join(self.skipped)}" if self.skipped else "")
 
     def describe(self) -> str:
-        if not self.skipped and self.columns[:1] == [0] and len(set(self.columns)) == 1:
-            return "첫 열"
-        return f"행 라벨: {self.columns_desc()}"
+        desc = self.columns_desc()
+        return desc if desc == "첫 열" else f"행 라벨: {desc}"
 
 
 def numbering_level(text: str) -> int | None:
@@ -233,6 +243,12 @@ def numbering_level(text: str) -> int | None:
 
 
 def row_labels(t: DocTable) -> RowLabels:
+    if "labels" not in t._cache:
+        t._cache["labels"] = _row_labels(t)
+    return t._cache["labels"]
+
+
+def _row_labels(t: DocTable) -> RowLabels:
     layout = table_layout(t)
     header_row = t.rows[layout.header] if t.rows else []
     skip_cols: set[int] = set()
@@ -269,7 +285,7 @@ def row_labels(t: DocTable) -> RowLabels:
                 continue
             if level is None and NUMBERING_PREFIX_RE.match(text):
                 level = numbering_level(text)  # 번호가 붙은 이름 (예: "Ⅰ. 유동자산")
-            if TOTAL_ROW_RE.search(re.sub(r"\s+", "", name)):
+            if TOTAL_ROW_RE.search(re.sub(r"\s+", "", name)) or SUBTOTAL_SUFFIX_RE.search(name):
                 has_total = True
             else:
                 found.append((name, level, j))
@@ -304,17 +320,30 @@ def row_labels(t: DocTable) -> RowLabels:
     return RowLabels(columns, header, values, skipped, has_total, top_count, top_level)
 
 
-def labels_line(t: DocTable, limit: int, indent: str = "  ") -> str | None:
+LABELS_TOP_PLUS = "top+3"  # 행 라벨 상한: 1단계 전부 + 하위 단계 3개 (번호 체계 없는 표는 FIRST_COL_REDUCED)
+LABELS_TOP_PLUS_LOWER = 3
+
+
+def label_cap_desc(cap: int | str) -> str:
+    return "행 라벨 1단계 전부+하위 3개" if cap == LABELS_TOP_PLUS else f"행 라벨 최대 {cap}개"
+
+
+def labels_line(t: DocTable, limit: int | str, indent: str = "  ") -> str | None:
     labels = row_labels(t)
     if not labels.values and not labels.has_total:
         return None
-    # 번호 체계가 있으면 1단계는 개수 제한과 상관없이 전부, 남는 자리를 하위 단계로 채운다
-    shown = labels.values[:max(limit, labels.top_level_count or 0)]
+    top = labels.top_level_count or 0
+    if limit == LABELS_TOP_PLUS:
+        count = top + LABELS_TOP_PLUS_LOWER if labels.leveled else FIRST_COL_REDUCED
+    else:
+        # 번호 체계가 있으면 1단계는 개수 제한과 상관없이 전부, 남는 자리를 하위 단계로 채운다
+        count = max(int(limit), top)
+    shown = labels.values[:count]
     more = f" 외 {len(labels.values) - len(shown)}개" if len(labels.values) > len(shown) else ""
     total = " · 합계 행 있음" if labels.has_total else ""
     if labels.leveled:
-        return (f"{indent}행 라벨(상위 우선): {labels.columns_desc()} · {labels.top_level}단계 {labels.top_level_count}개 / "
-                f"전체 {len(labels.values)}개: {', '.join(shown)}{more}{total}")
+        return (f"{indent}행 라벨(상위 우선): {labels.columns_desc()} · {labels.top_level}단계 {top}/{len(labels.values)}: "
+                f"{', '.join(shown)}{more}{total}")
     return f"{indent}{labels.describe()}({len(labels.values)}): {', '.join(shown)}{more}{total}"
 
 
@@ -513,7 +542,7 @@ def _fit_with_paragraphs(model: DocModel, detail: set[int], brief: str, title: b
 
 def fit_document(model: DocModel, budget: int) -> tuple[str, list[str]]:
     """비상세 표 머리글 3칸 → 데이터 행 2→1 → 문단 80→40자 → 행 라벨 15→8 → 비보호 문단
-    → 비상세 표 머리글 생략 → 비상세 표 앞 문단 제목 생략 → 상세 표 수 → 본문 끝 줄부터."""
+    → 비상세 표 머리글 생략 → 비상세 표 앞 문단 제목 생략 → 행 라벨 1단계 전부+하위 3개 → 상세 표 수 → 본문 끝 줄부터."""
     priority = model.detail_priority()
     everything = set(range(1, len(model.paragraphs) + 1))
     n = len(priority)
@@ -525,12 +554,14 @@ def fit_document(model: DocModel, budget: int) -> tuple[str, list[str]]:
         if len(text) <= budget:
             return text, locations
     level = (1, 40, FIRST_COL_REDUCED)
-    attempts = [(n, "short", True), (n, "none", True), (n, "none", False)]
-    attempts += [(k, "none", False) for k in range(n - 1, 0, -1)]
+    top_plus = (1, 40, LABELS_TOP_PLUS)
+    attempts = [(n, "short", True, level), (n, "none", True, level), (n, "none", False, level),
+                (n, "none", False, top_plus)]
+    attempts += [(k, "none", False, top_plus) for k in range(n - 1, 0, -1)]
     if n == 0:
-        attempts = [(0, "short", True), (0, "none", True), (0, "none", False)]
-    for k, brief, title in attempts:
-        text, locations, ok = _fit_with_paragraphs(model, set(priority[:k]), brief, title, level, budget)
+        attempts = [(0, "short", True, level), (0, "none", True, level), (0, "none", False, level)]
+    for k, brief, title, lv in attempts:
+        text, locations, ok = _fit_with_paragraphs(model, set(priority[:k]), brief, title, lv, budget)
         if ok:
             return text, locations
     return _truncate_by_lines(text, budget, level[1], level[0])
