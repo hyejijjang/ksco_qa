@@ -12,10 +12,10 @@ from pathlib import Path
 from typing import Callable
 
 from ksco_qa.profiler import csv_file, document, hwp, pdf, pptx_file, spreadsheet, structured
-from ksco_qa.profiler.base import PROFILE_MAX_CHARS, PROFILER_VERSION, FileProfile, ProfileError, ProfileParts, fit
+from ksco_qa.profiler.base import PROFILE_MAX_CHARS, PROFILER_VERSION, FileProfile, Fittable, ProfileError
 
 # 확장자(소문자) → 프로파일러
-PROFILERS: dict[str, Callable[[Path], ProfileParts]] = {
+PROFILERS: dict[str, Callable[[Path], Fittable]] = {
     "csv": csv_file.profile,
     "xlsx": spreadsheet.profile,
     "xlsm": spreadsheet.profile,
@@ -32,6 +32,27 @@ PROFILERS: dict[str, Callable[[Path], ProfileParts]] = {
     "html": structured.profile_html,
     "htm": structured.profile_html,
 }
+
+
+# zip 기반 형식: 확장자가 이것인데 zip이 아니면 EXTENSION_MISMATCH
+ZIP_BASED = {"hwpx", "docx", "xlsx", "xlsm", "pptx", "odt", "ods"}
+OLE_MAGIC = bytes.fromhex("d0cf11e0a1b11ae1")
+
+
+def extension_mismatch(path: Path) -> str | None:
+    """확장자는 zip 기반 형식인데 실제로 zip이 아니면 사유 문자열, 아니면 None."""
+    import zipfile
+
+    ext = path.suffix.lower().lstrip(".")
+    if ext not in ZIP_BASED or zipfile.is_zipfile(path):
+        return None
+    with open(path, "rb") as f:
+        head = f.read(8)
+    if head == OLE_MAGIC:
+        actual = "HWP 구버전 추정" if ext == "hwpx" else "OLE 복합 문서(구버전 Office·HWP) 추정"
+    else:
+        actual = "알 수 없음"
+    return f"확장자는 .{ext}인데 zip 형식이 아님 (실제 형식: {actual})"
 
 
 def file_hash(path: Path) -> str:
@@ -61,12 +82,15 @@ def profile_file(path: Path, locator: str, cache_dir: Path | None, budget: int =
             cached = FileProfile.from_dict(json.loads(cache_path.read_text(encoding="utf-8")))
             cached.locator = locator
             return cached
-    if profiler is None:
+    mismatch = extension_mismatch(path) if profiler is not None else None
+    if mismatch is not None:
+        result = FileProfile(locator, fmt, False, "", [], f"EXTENSION_MISMATCH: {mismatch}", "EXTENSION_MISMATCH")
+    elif profiler is None:
         result = FileProfile(locator, fmt, False, "", [], f"지원하지 않는 형식: {fmt}")
     else:
         try:
-            parts = profiler(path)
-            result = FileProfile(locator, fmt, True, fit(parts, budget), list(parts.locations))
+            text, locations = profiler(path).fit_to(budget)
+            result = FileProfile(locator, fmt, True, text, locations)
         except ProfileError as e:
             result = FileProfile(locator, fmt, False, "", [], str(e))
         except Exception as e:  # 손상 파일 등: NOT_INSPECTED로 기록하고 진행

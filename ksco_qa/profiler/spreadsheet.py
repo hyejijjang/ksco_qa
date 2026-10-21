@@ -7,11 +7,13 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from ksco_qa.profiler.base import TOTAL_LABEL_RE, ProfileError, ProfileParts, is_blank, ranges, row_text
+from ksco_qa.profiler.doc_model import FIRST_COL_MAX, DocTable, labels_line, table_layout
 
 HEADER_ROWS = 3
 SAMPLE = 3
@@ -130,6 +132,33 @@ def _load_ods(path: Path) -> list[SheetData]:
     return sheets
 
 
+_RANGE_RE = re.compile(r"^([A-Z]+)(\d+):([A-Z]+)(\d+)$")
+
+
+def _col_index(letters: str) -> int:
+    n = 0
+    for ch in letters:
+        n = n * 26 + ord(ch) - 64
+    return n - 1
+
+
+def _row_labels_line(s: SheetData) -> str | None:
+    """행 라벨 (PDF·문서형 표와 같은 규칙): 위에서부터 제목 행을 건너뛰고 머리글 행을 찾아 그 아래 행에 적용."""
+    if not s.rows:
+        return None
+    n_cols = max(len(r) for r in s.rows)
+    full_span = set()
+    for rng in s.merges or []:
+        m = _RANGE_RE.match(rng)
+        if m and m.group(2) == m.group(4) and _col_index(m.group(3)) - _col_index(m.group(1)) + 1 >= n_cols:
+            full_span.add(int(m.group(2)) - 1)
+    rows = [["" if v is None else str(v) for v in r] for r in s.rows]
+    table = DocTable(rows, 0, False, full_span)
+    layout = table_layout(table)
+    line = labels_line(table, FIRST_COL_MAX, indent="  ")
+    return f"{line} (머리글 {layout.header + 1}행 기준)" if line else None
+
+
 LOADERS = {"xlsx": _load_xlsx, "xlsm": _load_xlsx, "xls": _load_xls, "ods": _load_ods}
 
 
@@ -157,6 +186,9 @@ def profile(path: Path) -> ProfileParts:
         totals = [i + 1 for i, r in enumerate(s.rows)
                   if r and TOTAL_LABEL_RE.match(str(next((c for c in r if not is_blank(c)), "")))]
         fixed.append(f"  합계·소계 행: {ranges(totals[:20]) + '행' if totals else '없음'}")
+        label = _row_labels_line(s)
+        if label:
+            fixed.append(label)
         fixed.extend(f"  ({note})" for note in s.notes)
 
         body = list(range(HEADER_ROWS, n_rows))

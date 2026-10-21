@@ -19,7 +19,7 @@ from ksco_qa.config import Config
 from ksco_qa.profiler import FileProfile, combine_for_row, profile_file, row_budget
 from ksco_qa.profiler.zip_file import ZIP_LOCATOR_SEP, member_display_name, profile_member
 
-P0_VERSION = "1"
+P0_VERSION = "2"
 DATALIST_SUFFIX = "_DataList.xlsx"
 SHEET_NAME = "DataList"
 HEADER_ROW = 1
@@ -514,6 +514,7 @@ def run_p0(task_folder: Path, cfg: Config, run_dir: Path, mapping_audit_path: Pa
         reference = classify_reference(row.values.get("E"))
         file_profile = combine_for_row(profiles) if profiles else None
         warnings = list(match.warnings) + jobinfo_warnings(row.values.get("I"))
+        warnings += list(dict.fromkeys(p.warning for p in profiles if p.warning))
         if is_blank(row.values.get("G")):
             warnings.append("ORIGINAL_TASK_EMPTY")
         reason = match.reason

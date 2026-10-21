@@ -10,10 +10,10 @@ from __future__ import annotations
 import re
 from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, time
-from typing import Any
+from typing import Any, Protocol
 
 PROFILE_MAX_CHARS = 1500
-PROFILER_VERSION = "1"
+PROFILER_VERSION = "3"
 CELL_MAX = 40
 ROW_MAX = 200
 CATEGORY_MAX = 20
@@ -21,6 +21,13 @@ CATEGORY_REDUCED = 10
 
 TOTAL_LABEL_RE = re.compile(r"^\s*(합\s*계|소\s*계|총\s*계|계|total|subtotal|grand total)\s*$", re.I)
 HEADING_RE = re.compile(r"^\s*(제\s*\d+\s*[장절편부]|[IVX]+\.\s|\d+\.\s+\S|\d+\.\d+(\.\d+)?\s+\S|[가-하]\.\s)")
+
+
+class Fittable(Protocol):
+    """형식별 프로파일러의 결과. 예산에 맞춘 (글, 관찰 위치)를 돌려준다.
+    관찰 위치는 글에 실제로 담은 범위만 적는다 (문서형·PDF·PPTX)."""
+
+    def fit_to(self, budget: int) -> tuple[str, list[str]]: ...
 
 
 class ProfileError(Exception):
@@ -35,6 +42,7 @@ class FileProfile:
     text: str  # 관찰 위치 포함, 예산 이내
     inspected_locations: list[str] = field(default_factory=list)
     error: str | None = None  # inspected=False일 때 사유
+    warning: str | None = None  # P0 경고 코드 (예: EXTENSION_MISMATCH)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -57,6 +65,9 @@ class ProfileParts:
     tail: list[str] = field(default_factory=list)
     tail_label: str = "끝 샘플"
     categories: dict[str, list[str]] = field(default_factory=dict)
+
+    def fit_to(self, budget: int) -> tuple[str, list[str]]:
+        return fit(self, budget), list(self.locations)
 
 
 def render(p: ProfileParts, category_limit: int = CATEGORY_MAX) -> str:

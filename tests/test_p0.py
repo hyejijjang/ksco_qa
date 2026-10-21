@@ -132,6 +132,17 @@ def test_not_inspected_reason_recorded(p0) -> None:
     assert "NOT_INSPECTED" in card["file_profile"]
 
 
+def test_extension_mismatch_in_mapping_audit(p0) -> None:
+    """확장자는 .hwpx인데 zip이 아니면 NOT_INSPECTED + 경고 EXTENSION_MISMATCH, mapping_audit에 보인다."""
+    result, tmp = p0
+    card, rec = by_id(result)["T-016"]
+    assert card["match_status"] == "MATCHED" and card["inspected"] is False
+    assert "EXTENSION_MISMATCH: 확장자는 .hwpx인데 zip 형식이 아님 (실제 형식: HWP 구버전 추정)" in rec["reason"]
+    with open(tmp / "audit.csv", encoding="utf-8-sig", newline="") as f:
+        row = next(r for r in csv.DictReader(f) if r["id"] == "T-016")
+    assert "EXTENSION_MISMATCH" in row["warnings"].split("; ")
+
+
 def test_all_profiles_within_budget(p0) -> None:
     for card in p0[0].row_cards:
         assert card["file_profile"] is None or len(card["file_profile"]) <= 1500

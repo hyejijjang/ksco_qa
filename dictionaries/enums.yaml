@@ -86,6 +86,7 @@ p0_warning:
   - JOBINFO_SHEET_ERROR
   - JOBINFO_MATCH_FAILED
   - ORIGINAL_TASK_EMPTY
+  - EXTENSION_MISMATCH  # 확장자는 zip 기반(hwpx 등)인데 zip이 아님 → NOT_INSPECTED
 
 # --- 7.5 표 밖: 기획서 다른 절·CLAUDE.md에서 값이 확정된 enum ---
 
