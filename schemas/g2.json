@@ -1,0 +1,173 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "verify_status",
+    "overlap_review",
+    "new_checks",
+    "b_coverage_status",
+    "reference_action",
+    "reference_readiness",
+    "blueprints",
+    "reason",
+    "evidence_loc",
+    "issues",
+    "proposed_fix"
+  ],
+  "properties": {
+    "verify_status": { "type": "string", "enum": ["PASS", "REVIEW", "FAIL"] },
+    "overlap_review": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "checks", "disagree"],
+      "properties": {
+        "mode": { "type": "string", "enum": ["AGREE_CHECK", "FULL_RECHECK"] },
+        "checks": { "$ref": "#/$defs/overlap_checks" },
+        "disagree": { "type": "array", "items": { "$ref": "#/$defs/disagree_item" } }
+      }
+    },
+    "new_checks": { "$ref": "#/$defs/new_checks" },
+    "b_coverage_status": {
+      "type": "string",
+      "enum": ["SUFFICIENT", "PARTIAL_NONCRITICAL", "PARTIAL_CRITICAL", "MISSING"]
+    },
+    "reference_action": {
+      "type": "string",
+      "enum": ["GENERATE", "REUSE", "SUPPLEMENT", "ADAPT", "REPLACE", "CHECK_ACCESS"]
+    },
+    "reference_readiness": {
+      "type": "string",
+      "enum": ["BLUEPRINT_READY", "READY_AS_IS", "READY_WITH_ACTION", "HOLD"]
+    },
+    "blueprints": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scenario", "reference", "reasoning_map", "evaluation"],
+      "properties": {
+        "scenario": { "type": "string", "maxLength": 800 },
+        "reference": { "type": "string", "maxLength": 800 },
+        "reasoning_map": { "type": "string", "maxLength": 800 },
+        "evaluation": { "type": "string", "maxLength": 800 }
+      }
+    },
+    "reason": { "type": "string", "maxLength": 300 },
+    "evidence_loc": { "type": "string", "maxLength": 300 },
+    "issues": { "$ref": "#/$defs/issues" },
+    "proposed_fix": { "type": ["string", "null"], "maxLength": 500 }
+  },
+  "$defs": {
+    "check_status": { "type": "string", "enum": ["P", "R", "F", "NA"] },
+    "issue_text": { "type": ["string", "null"], "maxLength": 200 },
+    "overlap_checks": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "job_fit",
+        "deliverable_fit",
+        "grounding",
+        "input_contract",
+        "reasoning_requirement",
+        "reconstructability",
+        "answer_leakage",
+        "no_external_search",
+        "reference_burden",
+        "output_specification"
+      ],
+      "properties": {
+        "job_fit": { "$ref": "#/$defs/check_status" },
+        "deliverable_fit": { "$ref": "#/$defs/check_status" },
+        "grounding": { "$ref": "#/$defs/check_status" },
+        "input_contract": { "$ref": "#/$defs/check_status" },
+        "reasoning_requirement": { "$ref": "#/$defs/check_status" },
+        "reconstructability": { "$ref": "#/$defs/check_status" },
+        "answer_leakage": { "$ref": "#/$defs/check_status" },
+        "no_external_search": { "$ref": "#/$defs/check_status" },
+        "reference_burden": { "$ref": "#/$defs/check_status" },
+        "output_specification": { "$ref": "#/$defs/check_status" }
+      }
+    },
+    "new_checks": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "task_clarity",
+        "agentic_value",
+        "difficulty_fit",
+        "scenario_feasibility",
+        "reference_design_feasibility",
+        "evaluation_alignment"
+      ],
+      "properties": {
+        "task_clarity": { "$ref": "#/$defs/check_status" },
+        "agentic_value": { "$ref": "#/$defs/check_status" },
+        "difficulty_fit": { "$ref": "#/$defs/check_status" },
+        "scenario_feasibility": { "$ref": "#/$defs/check_status" },
+        "reference_design_feasibility": { "$ref": "#/$defs/check_status" },
+        "evaluation_alignment": { "$ref": "#/$defs/check_status" }
+      }
+    },
+    "disagree_item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["indicator", "reason"],
+      "properties": {
+        "indicator": {
+          "type": "string",
+          "enum": [
+            "job_fit",
+            "deliverable_fit",
+            "grounding",
+            "input_contract",
+            "reasoning_requirement",
+            "reconstructability",
+            "answer_leakage",
+            "no_external_search",
+            "reference_burden",
+            "output_specification"
+          ]
+        },
+        "reason": { "type": "string", "maxLength": 200 }
+      }
+    },
+    "issues": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "job_fit",
+        "deliverable_fit",
+        "grounding",
+        "input_contract",
+        "reasoning_requirement",
+        "reconstructability",
+        "answer_leakage",
+        "no_external_search",
+        "reference_burden",
+        "output_specification",
+        "task_clarity",
+        "agentic_value",
+        "difficulty_fit",
+        "scenario_feasibility",
+        "reference_design_feasibility",
+        "evaluation_alignment"
+      ],
+      "properties": {
+        "job_fit": { "$ref": "#/$defs/issue_text" },
+        "deliverable_fit": { "$ref": "#/$defs/issue_text" },
+        "grounding": { "$ref": "#/$defs/issue_text" },
+        "input_contract": { "$ref": "#/$defs/issue_text" },
+        "reasoning_requirement": { "$ref": "#/$defs/issue_text" },
+        "reconstructability": { "$ref": "#/$defs/issue_text" },
+        "answer_leakage": { "$ref": "#/$defs/issue_text" },
+        "no_external_search": { "$ref": "#/$defs/issue_text" },
+        "reference_burden": { "$ref": "#/$defs/issue_text" },
+        "output_specification": { "$ref": "#/$defs/issue_text" },
+        "task_clarity": { "$ref": "#/$defs/issue_text" },
+        "agentic_value": { "$ref": "#/$defs/issue_text" },
+        "difficulty_fit": { "$ref": "#/$defs/issue_text" },
+        "scenario_feasibility": { "$ref": "#/$defs/issue_text" },
+        "reference_design_feasibility": { "$ref": "#/$defs/issue_text" },
+        "evaluation_alignment": { "$ref": "#/$defs/issue_text" }
+      }
+    }
+  }
+}

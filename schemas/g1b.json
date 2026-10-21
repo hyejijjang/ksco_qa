@@ -1,0 +1,26 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["pairs", "added_pairs"],
+  "properties": {
+    "pairs": { "type": "array", "items": { "$ref": "#/$defs/pair" } },
+    "added_pairs": { "type": "array", "items": { "$ref": "#/$defs/pair" } }
+  },
+  "$defs": {
+    "pair": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["row_1", "row_2", "verdict", "evidence", "conclusion"],
+      "properties": {
+        "row_1": { "type": "integer" },
+        "row_2": { "type": "integer" },
+        "verdict": {
+          "type": "string",
+          "enum": ["EXACT", "SEMANTIC", "PARAMETER_VARIANT", "HIGH_OVERLAP", "DISTINCT", "UNCERTAIN"]
+        },
+        "evidence": { "type": "string", "maxLength": 300 },
+        "conclusion": { "type": ["string", "null"], "maxLength": 200 }
+      }
+    }
+  }
+}

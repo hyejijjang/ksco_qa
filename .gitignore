@@ -1,0 +1,24 @@
+# 비밀값
+.env
+.env.*
+!.env.example
+
+# 실행 산출물 (run 저장소)
+_work/
+/03_results/
+
+# 실제 Task 데이터 — 저장소에 두지 않는다 (CLAUDE.md 개발 규칙)
+# tests/fixtures/ 의 작은 샘플은 예외라서 저장소 루트 기준으로만 막는다.
+/*_DataList.xlsx
+/*_DataList.xls
+/01_output_files/
+/task_config.yaml
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+*.egg-info/
+build/
+dist/

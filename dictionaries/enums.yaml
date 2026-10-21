@@ -1,0 +1,81 @@
+# KSCO Task QA enum 사전 — enum의 유일한 출처 (CLAUDE.md 핵심 원칙 4)
+# schemas/*.json의 enum, 설정 검증, G3 검증은 모두 이 파일을 기준으로 한다.
+# 값을 바꾸면 schemas/*.json도 같이 바꾸고 tests/test_enums_schemas.py를 통과시킨다.
+
+# --- 설계 7.5 enum 사전 ---
+
+match_status: [MATCHED, AMBIGUOUS, CONFLICT, NOT_FOUND, INACCESSIBLE, INVENTORY_INCOMPLETE]
+
+reference_mode: [GENERATE_REFERENCE, PROVIDED_REFERENCE, UNRESOLVED_REFERENCE]
+
+# revision.action
+revision_action: [KEEP, REGENERATE, REVIEW_B, RESELECT_B]
+
+pair_verdict: [EXACT, SEMANTIC, PARAMETER_VARIANT, HIGH_OVERLAP, DISTINCT, UNCERTAIN]
+
+# duplicate.status
+duplicate_status: [UNIQUE, DUPLICATE, REVIEW, NOT_EVALUATED]
+
+duplicate_type: [EXACT, SEMANTIC, PARAMETER_VARIANT, EXPRESSION_ONLY, NONE, UNDETERMINED]
+
+overlap_status:
+  - NONE
+  # - LOW_OVERLAP   # CLAUDE.md 설계 보완: 생성 규칙이 정해질 때까지 사용하지 않는다
+  - HIGH_OVERLAP
+  - UNDETERMINED
+
+# verify.status (모델 출력은 PASS/REVIEW/FAIL만. SKIPPED는 코드가 규칙으로 기록 — 설계 5.6, 7.2)
+verify_status: [PASS, REVIEW, FAIL, SKIPPED]
+
+b_coverage_status: [SUFFICIENT, PARTIAL_NONCRITICAL, PARTIAL_CRITICAL, MISSING]
+
+reference_action: [GENERATE, REUSE, SUPPLEMENT, ADAPT, REPLACE, CHECK_ACCESS]
+
+reference_readiness: [BLUEPRINT_READY, READY_AS_IS, READY_WITH_ACTION, HOLD]
+
+# final.status
+final_status: [PASS, REVIEW, FAIL]
+
+next_action:
+  - HANDOFF_TO_AI_TEAM
+  - EXCLUDE_DUPLICATE
+  - REVISE_TASK
+  - RESELECT_DELIVERABLE
+  - CHECK_ASSETS
+  - CHECK_DUPLICATE
+  - REVIEW_MANUAL
+
+# 지표 상태: 모델 출력 → G3에서 변환
+check_status_model: [P, R, F, NA]
+check_status_final: [PASS, REVIEW, FAIL, N_A]
+check_status_map:
+  "P": PASS
+  "R": REVIEW
+  "F": FAIL
+  "NA": N_A
+
+# --- 7.5 표 밖: 기획서 다른 절·CLAUDE.md에서 값이 확정된 enum ---
+
+# 각 Gate 객체의 판정 주체 (설계 7.4)
+decided_by: [MODEL, RULE, HUMAN]
+
+# calls.jsonl status (설계 7.3)
+call_status: [OK, RETRIED, SCHEMA_FAIL, VALIDATION_FAIL, FAILED]
+
+# call_id 구성 요소 (CLAUDE.md 설계 보완)
+attempt_kind: [first, escalate, feedback]
+
+# 모델을 부르는 단계 (설계 4장)
+call_stage: [G0, G1B, G2]
+
+# 설정 G2_OVERLAP_MODE (설계 5.6, 10.2)
+g2_overlap_mode: [AGREE_CHECK, FULL_RECHECK]
+
+# 설정 FILE_ACCESS (설계 6.6, 10.2)
+file_access: [profile, "profile+tools"]
+
+# 실행 모드 --mode (설계 6.5)
+call_mode: [online, batch]
+
+# verify.review_independence (설계 5.6, 00_Work_Run.md 6장)
+review_independence: [SEPARATE_CALL, SAME_WORK_CONTEXT]

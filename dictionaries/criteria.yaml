@@ -1,0 +1,87 @@
+# 16개 지표 criterion 고정 사전 — 설계 부록 A 원문 그대로 (요약·재작성 금지)
+# G3가 verify.checks와 revision.g0_self_check의 criterion을 이 문장으로 채운다.
+# 앞의 10개는 G0와 G2가 함께 쓴다.
+#   g0_key: G0 checks의 차원 이름 (G2 전용 지표는 null)
+#   g2_key: G2 checks의 지표 이름
+#   stage : 부록 A "단계" 칸 원문
+
+indicators:
+  - g0_key: job_fit
+    g2_key: job_fit
+    stage: "G0·G2"
+    criterion: "해당 직업의 직무 범위에서 수행 가능한 업무여야 함"
+
+  - g0_key: deliverable_fit
+    g2_key: deliverable_fit
+    stage: "G0·G2"
+    criterion: "Deliverable의 목적·필수 표/섹션·파일 형식과 결과 요구가 부합해야 함"
+
+  - g0_key: grounding
+    g2_key: grounding
+    stage: "G0·G2"
+    criterion: "근거 없는 결과항목·기간·기관·업무 규칙을 추가하지 않아야 함"
+
+  - g0_key: input_contract
+    g2_key: input_contract
+    stage: "G0·G2"
+    criterion: "최종 Agent에 제공될 Reference의 최소 종류·필드를 정의할 수 있어야 함"
+
+  - g0_key: reasoning_validity
+    g2_key: reasoning_requirement
+    stage: "G0 / G2"
+    criterion: "필요한 집계·계산·대조·규정 적용·판단 규칙을 식별할 수 있어야 함"
+
+  - g0_key: reconstructability
+    g2_key: reconstructability
+    stage: "G0·G2"
+    criterion: "합리적 입력을 전제할 때 출력의 핵심 구조를 생성할 수 있어야 함"
+
+  - g0_key: no_answer_leakage
+    g2_key: answer_leakage
+    stage: "G0 / G2"
+    criterion: "Deliverable의 정답 수치·결론이 Task·입력에 유출되지 않아야 함"
+
+  - g0_key: no_external_search
+    g2_key: no_external_search
+    stage: "G0·G2"
+    criterion: "최종 Agent에게 외부 정보 검색을 요구하지 않아야 함"
+
+  - g0_key: reference_burden
+    g2_key: reference_burden
+    stage: "G0·G2"
+    criterion: "향후 Reference 준비 규모·난이도가 설명 가능하고 실현 가능해야 함"
+
+  - g0_key: output_specification
+    g2_key: output_specification
+    stage: "G0·G2"
+    criterion: "출력 형식과 확인 가능한 구조가 충분히 명시되어야 함"
+
+  - g0_key: null
+    g2_key: task_clarity
+    stage: "G2"
+    criterion: "요청 목적·대상 범위·핵심 처리·결과 요구가 모호하지 않아야 함"
+
+  - g0_key: null
+    g2_key: agentic_value
+    stage: "G2"
+    criterion: "단순 복사가 아닌 다단계 자료 처리·판단·구성을 요구해야 함"
+
+  - g0_key: null
+    g2_key: difficulty_fit
+    stage: "G2"
+    criterion: "난이도가 필요한 처리·판단 능력과 균형을 이루어야 함 (길이로 판단하지 않음)"
+
+  - g0_key: null
+    g2_key: scenario_feasibility
+    stage: "G2"
+    criterion: "사건·수치를 창작하지 않고 현실적 업무 맥락·범위를 구성할 수 있어야 함"
+
+  - g0_key: null
+    g2_key: reference_design_feasibility
+    stage: "G2"
+    criterion: "Reference의 파일 유형·최소 필드·단위·범위·예외를 설계할 수 있어야 함"
+
+  - g0_key: null
+    g2_key: evaluation_alignment
+    stage: "G2"
+    criterion: "수행 결과를 Deliverable과 객관적으로 대조·검산할 수 있어야 함"
