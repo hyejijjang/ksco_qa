@@ -19,6 +19,7 @@ MODULES = [
     "ksco_qa.profiler.pptx_file",
     "ksco_qa.profiler.hwp",
     "ksco_qa.profiler.zip_file",
+    "ksco_qa.profiler.structured",
     "ksco_qa.llm.client",
     "ksco_qa.stages.g0",
     "ksco_qa.stages.g1a",
@@ -36,13 +37,6 @@ def test_skeleton_imports(module: str) -> None:
     importlib.import_module(module)
 
 
-def test_profiler_modules_exist() -> None:
-    from ksco_qa.profiler import FORMAT_MODULES
-
-    for name in set(FORMAT_MODULES.values()):
-        importlib.import_module(f"ksco_qa.profiler.{name}")
-
-
 runner = CliRunner()
 
 
@@ -56,23 +50,67 @@ def test_cli_lists_all_modes() -> None:
 def test_cli_run_options() -> None:
     result = runner.invoke(app, ["run", "--help"])
     assert result.exit_code == 0
-    for opt in ("--stage", "--mode", "--resume"):
+    for opt in ("--stage", "--mode", "--resume", "--llm", "--mock-fault"):
         assert opt in result.output
+
+
+@pytest.mark.parametrize("args", [["estimate", "t"], ["export", "t"], ["compare", "t", "--with", "w"]])
+def test_no_key_needed_for_non_model_commands(no_api_key, args: list[str]) -> None:
+    """키 없이도 돌아야 하는 명령: 본문 미구현(NotImplementedError)까지 가고 키 오류로 멈추지 않는다."""
+    result = runner.invoke(app, args)
+    assert isinstance(result.exception, NotImplementedError), result.output
 
 
 @pytest.mark.parametrize(
     "args",
     [
-        ["estimate", "t"],
-        ["sample", "30", "t"],
         ["run", "t"],
-        ["run", "t", "--stage", "G2"],
         ["run", "t", "--mode", "batch"],
+        ["run", "t", "--stage", "G2"],
+        ["sample", "30", "t"],
+        ["sample", "30", "t", "--mode", "batch"],
         ["rerun-failed", "t"],
-        ["export", "t"],
-        ["compare", "t", "--with", "w"],
     ],
 )
-def test_cli_bodies_not_implemented(args: list[str]) -> None:
+def test_model_commands_require_key(no_api_key, args: list[str]) -> None:
     result = runner.invoke(app, args)
+    assert result.exit_code == 1
+    assert "OPENAI_API_KEY가 설정되지 않음" in result.output
+
+
+def test_key_present_then_config_checked(monkeypatch: pytest.MonkeyPatch, sample_task) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    result = runner.invoke(app, ["run", str(sample_task)])
+    assert result.exit_code == 1 and "MODEL_G0" in result.output
+    assert not (sample_task / "03_results").exists()
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["run", "{t}", "--llm", "mock"],
+        ["run", "{t}", "--llm", "mock", "--mode", "batch"],
+        ["sample", "3", "{t}", "--llm", "mock"],
+        ["rerun-failed", "{t}", "--llm", "mock", "--mock-fault", "schema_fail=0.5"],
+    ],
+)
+def test_mock_needs_no_key_and_reaches_pipeline(no_api_key, sample_task, args: list[str]) -> None:
+    result = runner.invoke(app, [a.format(t=sample_task) for a in args])
     assert isinstance(result.exception, NotImplementedError), result.output
+    assert "MOCK" in result.output
+    [run_dir] = list((sample_task / "03_results" / "_work").iterdir())
+    assert run_dir.name.startswith("mock-")
+    # P0는 실제로 돌고, mock 산출물은 run 폴더 안에만
+    assert (run_dir / "00_mapping_audit.csv").is_file() and (run_dir / "row_cards.jsonl").is_file()
+    assert sorted(p.name for p in (sample_task / "03_results").iterdir()) == ["_work"]
+
+
+def test_mock_fault_rejected_without_mock(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    result = runner.invoke(app, ["run", "t", "--mock-fault", "schema_fail=0.1"])
+    assert result.exit_code == 1 and "--llm mock" in result.output
+
+
+def test_bad_mock_fault_value(no_api_key, sample_task) -> None:
+    result = runner.invoke(app, ["run", str(sample_task), "--llm", "mock", "--mock-fault", "nope=1"])
+    assert result.exit_code == 1 and "--mock-fault" in result.output

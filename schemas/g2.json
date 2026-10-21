@@ -8,6 +8,8 @@
     "b_coverage_status",
     "reference_action",
     "reference_readiness",
+    "reference_conflict",
+    "reference_conflict_note",
     "blueprints",
     "reason",
     "evidence_loc",
@@ -39,6 +41,8 @@
       "type": "string",
       "enum": ["BLUEPRINT_READY", "READY_AS_IS", "READY_WITH_ACTION", "HOLD"]
     },
+    "reference_conflict": { "type": ["boolean", "null"] },
+    "reference_conflict_note": { "type": ["string", "null"], "maxLength": 300 },
     "blueprints": {
       "type": "object",
       "additionalProperties": false,
@@ -109,7 +113,7 @@
     "disagree_item": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["indicator", "reason"],
+      "required": ["indicator", "g0_value", "new_value", "reason"],
       "properties": {
         "indicator": {
           "type": "string",
@@ -126,6 +130,8 @@
             "output_specification"
           ]
         },
+        "g0_value": { "$ref": "#/$defs/check_status" },
+        "new_value": { "$ref": "#/$defs/check_status" },
         "reason": { "type": "string", "maxLength": 200 }
       }
     },

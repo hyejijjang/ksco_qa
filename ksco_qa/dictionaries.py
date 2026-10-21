@@ -60,6 +60,14 @@ def g2_new_keys() -> list[str]:
     return [c["g2_key"] for c in load_criteria() if c["g0_key"] is None]
 
 
+def g2_key_for(key: str) -> str:
+    """G0 또는 G2 지표 이름 → G2 이름 (reasoning_validity → reasoning_requirement 등)."""
+    for c in load_criteria():
+        if key in (c["g0_key"], c["g2_key"]):
+            return c["g2_key"]
+    raise KeyError(f"criteria.yaml에 지표 '{key}'가 없다")
+
+
 def criterion_for(key: str) -> str:
     """G0 또는 G2 지표 이름으로 criterion 고정 문장을 찾는다."""
     for c in load_criteria():

@@ -721,14 +721,19 @@ accounting의 형식 분포는 CSV 240, XLSX 124, PDF 19, HWPX 9, XLS 2, ODT 2, 
 
 ### C. 최종 판정 규칙
 
-위에서부터 먼저 맞는 규칙 하나만 적용한다 (00_Work_Run.md 7.1).
+위에서부터 먼저 맞는 규칙 하나만 적용한다. 원문은 00_Work_Run.md 7.1이고 이 표는 요약이다.
 
 | 순서 | 조건 | final.status | next_action |
 |---|---|---|---|
 | 1 | G1 DUPLICATE | FAIL | EXCLUDE_DUPLICATE |
 | 2 | G0 RESELECT_B | FAIL | RESELECT_DELIVERABLE |
 | 3 | G2 FAIL | FAIL | REVISE_TASK |
-| 4 | P0 미해결, G0 REVIEW_B, G1 REVIEW·미완료, G2 REVIEW, Reference 접근 불명 | REVIEW | CHECK_ASSETS / CHECK_DUPLICATE / REVIEW_MANUAL 중 원인에 맞는 것 |
-| 5 | G0 KEEP·REGENERATE + G1 UNIQUE·완료 + G2 PASS + 매핑 오류 없음 | PASS | HANDOFF_TO_AI_TEAM |
+| 4 | P0 미해결, G0 REVIEW_B, G1 REVIEW·미완료, G2 REVIEW·미완료, Reference 접근 불명(UNRESOLVED·readiness HOLD·CONFLICT) | REVIEW | 아래 원인별 매핑 |
+| 5 | G0 KEEP·REGENERATE + G1 UNIQUE·완료 + G2 PASS + 매핑 오류 없음 + reference_readiness≠HOLD | PASS | HANDOFF_TO_AI_TEAM |
+
+규칙 4의 next_action (M1 결정, 2026-10-21)
+- P0 미해결·G0 REVIEW_B·Reference 접근 불명 → CHECK_ASSETS, G1 REVIEW·미완료 → CHECK_DUPLICATE, G2 REVIEW·미완료·호출 실패 → REVIEW_MANUAL.
+- 원인이 여럿이면 CHECK_ASSETS > CHECK_DUPLICATE > REVIEW_MANUAL 순으로 하나만 쓰고, 원인 전부는 reason_codes에 남긴다.
+- 예외: G0가 두 번 다 실패했거나 검증에 두 번 걸린 행(REVIEW_B, decided_by=RULE)은 REVIEW_MANUAL.
 
 HIGH_OVERLAP만으로는 FAIL이 되지 않는다. 서로 다른 이유의 FAIL은 reason_codes와 next_action으로 구분해 집계한다.

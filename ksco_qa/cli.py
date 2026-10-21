@@ -1,16 +1,27 @@
-"""ksco-qa CLI — 골격 (설계 10.1 실행 모드 8종, 10.3 재개 / CLAUDE.md 설계 보완 --resume).
+"""ksco-qa CLI (설계 10.1 실행 모드 8종, 10.3 재개 / CLAUDE.md 설계 보완 --resume).
 
 실행: uv run ksco-qa <mode> <task_folder>
 모델을 부르는 명령(run, sample, rerun-failed)은 사람이 직접 실행한다.
+--llm mock이면 실제 API 대신 MockClient가 응답한다 (API 키 불필요, 산출물은 _work/<run_id>/ 안에만).
+API 키(OPENAI_API_KEY)는 --llm openai로 run·sample·rerun-failed를 실행할 때만 확인한다.
 """
 
 from __future__ import annotations
 
 from enum import Enum
 from pathlib import Path
-from typing import Annotated, Optional
+from typing import Annotated, NoReturn, Optional
 
 import typer
+
+from ksco_qa.config import ConfigError, require_for_model_calls, resolve_config
+from ksco_qa.llm.client import BudgetExceeded, ForbiddenContext
+from ksco_qa.llm.factory import build_client
+from ksco_qa.llm.mock import MockFaults
+from ksco_qa.llm.openai_transport import ApiKeyMissing, require_api_key
+from ksco_qa.p0 import P0Stop
+from ksco_qa.pipeline import run_pipeline
+from ksco_qa.run import RunError, prepare_run
 
 app = typer.Typer(no_args_is_help=True, add_completion=False, help="KSCO Task QA 파이프라인 (P0→G0→G1→G2→G3)")
 
@@ -28,9 +39,60 @@ class Stage(str, Enum):
     G3 = "G3"
 
 
+class Llm(str, Enum):
+    openai = "openai"
+    mock = "mock"
+
+
 TaskFolder = Annotated[Path, typer.Argument(help="Task 폴더 (DataList·01_output_files·task_config.yaml)")]
 ConfigOpt = Annotated[Optional[Path], typer.Option("--config", help="전역 설정 파일 (YAML)")]
 ModeOpt = Annotated[Mode, typer.Option("--mode", help="online(기본) / batch (6.5)")]
+LlmOpt = Annotated[Llm, typer.Option("--llm", help="openai(기본) / mock (가짜 응답, API 키 불필요)")]
+FaultOpt = Annotated[
+    Optional[list[str]],
+    typer.Option("--mock-fault", help="mock 고장 주입, 반복 지정 (예: rate_limit=0.2, schema_fail=0.1, validation_fail=0.1, timeout=0.1, repeats=2)"),
+]
+
+
+def _fail(message: str) -> NoReturn:
+    typer.echo(message, err=True)
+    raise typer.Exit(1)
+
+
+def _start_model_run(
+    task_folder: Path,
+    *,
+    mode: Mode,
+    llm: Llm,
+    resume: str | None,
+    config: Path | None,
+    mock_fault: list[str] | None,
+    sample_n: int | None = None,
+    start_stage: str = "P0",
+    rerun_failed: bool = False,
+) -> None:
+    """run·sample·rerun-failed 공통 시작 (online·batch 모두)."""
+    if llm is Llm.openai:
+        if mock_fault:
+            _fail("--mock-fault는 --llm mock에서만 쓸 수 있다")
+        try:
+            require_api_key()
+        except ApiKeyMissing as e:
+            _fail(str(e))
+    try:
+        faults = MockFaults.parse(mock_fault) if llm is Llm.mock else None
+        cfg = resolve_config(task_folder, config, overrides={"MODE": mode.value})
+        if llm is Llm.openai:
+            require_for_model_calls(cfg)
+        ctx = prepare_run(task_folder, cfg, llm.value, resume=resume, sample_n=sample_n)
+        client = build_client(cfg, ctx, faults)
+    except (ValueError, ConfigError, RunError, P0Stop, ApiKeyMissing) as e:
+        _fail(str(e))
+    typer.echo(f"run_id: {ctx.run_id}" + ("  [MOCK — 산출물은 run 폴더 안에만]" if ctx.is_mock else ""))
+    try:
+        run_pipeline(ctx, cfg, client, start_stage=start_stage, rerun_failed=rerun_failed)
+    except (BudgetExceeded, ForbiddenContext, P0Stop) as e:
+        _fail(str(e))
 
 
 @app.command()
@@ -44,10 +106,12 @@ def sample(
     n: Annotated[int, typer.Argument(min=1, help="무작위로 뽑을 행 수")],
     task_folder: TaskFolder,
     mode: ModeOpt = Mode.online,
+    llm: LlmOpt = Llm.openai,
+    mock_fault: FaultOpt = None,
     config: ConfigOpt = None,
 ) -> None:
     """무작위 N행으로 전 단계를 실행 (별도 run) (10.1)."""
-    raise NotImplementedError
+    _start_model_run(task_folder, mode=mode, llm=llm, resume=None, config=config, mock_fault=mock_fault, sample_n=n)
 
 
 @app.command()
@@ -55,6 +119,8 @@ def run(
     task_folder: TaskFolder,
     stage: Annotated[Optional[Stage], typer.Option("--stage", help="지정 단계부터 끝까지")] = None,
     mode: ModeOpt = Mode.online,
+    llm: LlmOpt = Llm.openai,
+    mock_fault: FaultOpt = None,
     resume: Annotated[Optional[str], typer.Option("--resume", help="재개할 run_id (명시 재개)")] = None,
     config: ConfigOpt = None,
 ) -> None:
@@ -62,18 +128,25 @@ def run(
 
     재개 기준은 설정 해시 + 입력 파일 해시 (CLAUDE.md 설계 보완).
     """
-    raise NotImplementedError
+    _start_model_run(
+        task_folder, mode=mode, llm=llm, resume=resume, config=config, mock_fault=mock_fault,
+        start_stage=stage.value if stage else "P0",
+    )
 
 
 @app.command("rerun-failed")
 def rerun_failed(
     task_folder: TaskFolder,
     mode: ModeOpt = Mode.online,
+    llm: LlmOpt = Llm.openai,
+    mock_fault: FaultOpt = None,
     resume: Annotated[Optional[str], typer.Option("--resume", help="대상 run_id")] = None,
     config: ConfigOpt = None,
 ) -> None:
     """status가 FAILED·VALIDATION_FAIL인 호출만 다시 (10.1)."""
-    raise NotImplementedError
+    _start_model_run(
+        task_folder, mode=mode, llm=llm, resume=resume, config=config, mock_fault=mock_fault, rerun_failed=True
+    )
 
 
 @app.command()

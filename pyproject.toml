@@ -15,7 +15,7 @@ dependencies = [
     "xlrd",
     "odfpy",
     "charset-normalizer",
-    "pymupdf",
+    "pypdf",
     "lxml",
     "python-docx",
     "python-pptx",

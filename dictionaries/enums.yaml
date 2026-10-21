@@ -54,6 +54,39 @@ check_status_map:
   "F": FAIL
   "NA": N_A
 
+# final.reason_codes (06에 목록 없음 → M1 결정 16, CLAUDE.md 설계 보완)
+reason_code:
+  - DUPLICATE
+  - RESELECT_B
+  - G2_FAIL
+  - P0_NOT_FOUND
+  - P0_AMBIGUOUS
+  - P0_CONFLICT
+  - P0_INACCESSIBLE
+  - P0_INVENTORY_INCOMPLETE
+  - NOT_INSPECTED
+  - ORIGINAL_TASK_EMPTY
+  - G0_REVIEW_B
+  - G0_CALL_FAILED
+  - G0_VALIDATION_FAILED
+  - G1_REVIEW
+  - G1_INCOMPLETE
+  - G2_REVIEW
+  - G2_INCOMPLETE
+  - G2_CALL_FAILED
+  - REFERENCE_UNRESOLVED
+  - REFERENCE_HOLD
+  - REFERENCE_CONFLICT
+
+# P0 경고 (mapping_audit warnings 열, 실행을 멈추지 않음)
+p0_warning:
+  - D_TRAILING_SPACE
+  - PARTIAL_FORMAT
+  - JOBINFO_EMPTY
+  - JOBINFO_SHEET_ERROR
+  - JOBINFO_MATCH_FAILED
+  - ORIGINAL_TASK_EMPTY
+
 # --- 7.5 표 밖: 기획서 다른 절·CLAUDE.md에서 값이 확정된 enum ---
 
 # 각 Gate 객체의 판정 주체 (설계 7.4)

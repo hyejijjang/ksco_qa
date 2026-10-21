@@ -5,7 +5,41 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from ksco_qa.config import Config
+
 SCHEMA_VERSION = "ksco-taskqa/canonical-1.0"
+
+
+CALL_STAGES = ("G0", "G1B", "G2")
+
+
+def execution_notes_object(*, run_id: str, llm: str, cfg: Config, prompt_versions: dict[str, str]) -> dict[str, Any]:
+    """run_report.json에 남길 실행 방식 객체 (7.4). mock run이면 "MOCK"을 기록해 실제 결과와 구분한다."""
+    mock = llm == "mock"
+    return {
+        "pipeline": "API 파이프라인",
+        "llm": "MOCK" if mock else "OPENAI",
+        "run_id": run_id,
+        "mode": cfg.MODE,
+        "models": {s: ("mock" if mock else getattr(cfg, f"MODEL_{s}")) for s in CALL_STAGES},
+        "reasoning_effort": {s: getattr(cfg, f"EFFORT_{s}") for s in CALL_STAGES},
+        "prompt_versions": dict(prompt_versions),
+        "G2_OVERLAP_MODE": cfg.G2_OVERLAP_MODE,
+        "review_independence": "SEPARATE_CALL",
+    }
+
+
+def execution_notes(*, run_id: str, llm: str, cfg: Config, prompt_versions: dict[str, str]) -> str:
+    """final.execution_notes 문자열 (06에 타입 없음 → M1 결정 19).
+    예: "API 파이프라인; run_id=…; G0=모델/추론강도; G1B=…; G2=…; prompt=G0:…,G1B:…,G2:…;
+    G2_OVERLAP_MODE=…; review_independence=SEPARATE_CALL". mock이면 "API 파이프라인(MOCK)"."""
+    o = execution_notes_object(run_id=run_id, llm=llm, cfg=cfg, prompt_versions=prompt_versions)
+    parts = ["API 파이프라인(MOCK)" if o["llm"] == "MOCK" else "API 파이프라인", f"run_id={run_id}"]
+    parts += [f"{s}={o['models'][s]}/{o['reasoning_effort'][s]}" for s in CALL_STAGES]
+    parts.append("prompt=" + ",".join(f"{s}:{prompt_versions.get(s, '-')}" for s in CALL_STAGES))
+    parts.append(f"G2_OVERLAP_MODE={o['G2_OVERLAP_MODE']}")
+    parts.append(f"review_independence={o['review_independence']}")
+    return "; ".join(parts)
 
 
 def expand_checks(model_checks: dict[str, str], issues: dict[str, str | None], evidence_loc: str) -> dict[str, dict[str, str]]:

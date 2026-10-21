@@ -100,6 +100,23 @@ def test_check_keys_match_criteria() -> None:
     assert list(g2["issues"]["properties"]) == g2_overlap_keys() + g2_new_keys()
 
 
+def test_g2_disagree_item_structure() -> None:
+    """g2.md: disagree에 지표, G0 값, 새 값, 이유를 적는다."""
+    item = load_schema("g2")["$defs"]["disagree_item"]
+    assert item["required"] == ["indicator", "g0_value", "new_value", "reason"]
+    assert item["properties"]["g0_value"] == {"$ref": "#/$defs/check_status"}
+    assert item["properties"]["new_value"] == {"$ref": "#/$defs/check_status"}
+
+
+def test_g2_key_for_maps_g0_names() -> None:
+    from ksco_qa.dictionaries import g2_key_for
+
+    assert g2_key_for("reasoning_validity") == "reasoning_requirement"
+    assert g2_key_for("no_answer_leakage") == "answer_leakage"
+    assert g2_key_for("job_fit") == "job_fit"
+    assert [g2_key_for(k) for k in g0_check_keys()] == g2_overlap_keys()
+
+
 def test_low_overlap_not_active() -> None:
     """CLAUDE.md 설계 보완: LOW_OVERLAP은 생성 규칙이 정해질 때까지 사용하지 않는다."""
     assert "LOW_OVERLAP" not in enum_values("overlap_status")
