@@ -1,4 +1,4 @@
-"""compare 입력 형식: Work 결과 CSV 또는 DataList R~V열 (M5 비교 로직 전, 형식만)."""
+"""Work 비교 입력: CSV/TSV 또는 DataList R~V열."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from pathlib import Path
 import openpyxl
 import pytest
 
-from fixtures.real_like import WORK_RESULT_COLUMNS, write_work_result_csv
+from fixtures.real_like import WORK_RESULT_COLUMNS, work_result_rows, write_work_result_csv
 from fixtures.sample_task import DATA_ROWS, LEAK_MARK, TASK_NAME
 from ksco_qa.compare import (
     WORK_RESULT_CSV_COLUMNS,
@@ -26,6 +26,16 @@ def test_load_work_result_csv(tmp_path: Path, encoding: str) -> None:
     assert list(rows) == ["T-001", "T-002", "T-003"]
     assert rows["T-002"].final_verdict == "가상판정C" and rows["T-002"].regenerated_task == "가상 재생성 Task"
     assert rows["T-003"].ai_verdict is None and rows["T-001"].source_row is None
+
+
+def test_load_tab_delimited_work_result(tmp_path: Path) -> None:
+    path = tmp_path / "work_result.csv.tsv"
+    with open(path, "w", encoding="utf-8", newline="") as output:
+        writer = csv.DictWriter(output, fieldnames=WORK_RESULT_COLUMNS, delimiter="\t")
+        writer.writeheader()
+        writer.writerows(work_result_rows())
+    rows = load_work_result(path)
+    assert len(rows) == 3 and rows["T-002"].regenerated_task == "가상 재생성 Task"
 
 
 def test_csv_wrong_columns_or_duplicate_id(tmp_path: Path) -> None:

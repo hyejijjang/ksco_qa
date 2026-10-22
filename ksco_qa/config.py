@@ -144,9 +144,17 @@ def resolve_config(
         raise ConfigError(str(e)) from e
 
 
-def require_for_model_calls(cfg: Config) -> None:
-    """모델을 부르는 실행 전에 MODEL_*·PRICE_* 누락을 막는다."""
-    missing = [k for k in REQUIRED_FOR_MODEL_CALLS if getattr(cfg, k) is None]
+def require_for_model_calls(cfg: Config, stages: tuple[str, ...] = ("G0", "G1B", "G2")) -> None:
+    """모델 호출 단계의 MODEL_*와 실측 비용 계산에 필요한 PRICE_* 누락을 막는다."""
+    allowed_stages = ("G0", "G1B", "G2")
+    if not stages or any(stage not in allowed_stages for stage in stages):
+        raise ValueError(f"stages는 {allowed_stages} 중 하나 이상이어야 한다: {stages}")
+    required = tuple(f"MODEL_{stage}" for stage in stages) + (
+        "PRICE_INPUT",
+        "PRICE_CACHED_INPUT",
+        "PRICE_OUTPUT",
+    )
+    missing = [key for key in required if getattr(cfg, key) is None]
     if missing:
         raise ConfigError(f"모델 호출에 필요한 설정이 비어 있다: {', '.join(missing)}")
 

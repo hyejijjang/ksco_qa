@@ -1,15 +1,18 @@
-"""비교 도구 (설계 4.1 비교 도구, 9.3, 10.1 compare --with). M5에서 구현, 지금은 입력 형식만.
+"""Work 결과와 최종 파이프라인 결과 비교 (설계 9.3, 10.1).
 
 Work 결과는 별도 jsonl이 없다. 두 가지 입력을 받는다 (2026-10-21 사용자 확인):
-- Work 결과 CSV (예: KSCO-33_work_result.csv): 열 id, AI 판정, 최종 판정, Regenerate Task, 원본 Task(백업), 검수 메모
+- Work 결과 CSV/TSV: 열 id, AI 판정, 최종 판정, Regenerate Task, 원본 Task(백업), 검수 메모
 - DataList.xlsx의 "DataList" 탭 R~V열 (R=AI 판정, S=최종 판정, T=Regenerate Task, U=원본 Task(백업), V=검수 메모), id는 B열
 이 열들은 비교에만 쓰고 row_card(모델 입력)에는 절대 넣지 않는다 (CLAUDE.md M1 결정).
-판정 값의 어휘(AI 판정·최종 판정에 어떤 값이 들어가는지)와 API 결과 필드와의 대응은 M5에서 정한다.
+M5 비교 기준: Work "AI 판정" ↔ API final.status, Work "Regenerate Task" ↔
+API revision.regenerated_task_new. Work "최종 판정"은 사용자가 지정하지 않아 비교하지 않는다.
 """
 
 from __future__ import annotations
 
 import csv
+import io
+import json
 import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
@@ -28,6 +31,10 @@ WORK_RESULT_CSV_COLUMNS = ["id"] + [name for name, _ in WORK_RESULT_FIELDS.value
 
 class WorkResultFormatError(Exception):
     """Work 결과 파일의 열 구조가 기대와 다름, id 누락·중복."""
+
+
+class CompareError(Exception):
+    """API 결과 JSONL이 없거나 비교에 필요한 구조가 잘못됨."""
 
 
 @dataclass(frozen=True)
@@ -62,7 +69,7 @@ def _check_ids(rows: list[WorkResultRow], source: str) -> dict[str, WorkResultRo
 
 
 def load_work_result_csv(path: Path) -> dict[str, WorkResultRow]:
-    """Work 결과 CSV를 id → 행으로 읽는다. 인코딩은 UTF-8(BOM 포함) → CP949 순서."""
+    """Work 결과 CSV/TSV를 id → 행으로 읽는다. 인코딩은 UTF-8(BOM 포함) → CP949 순서."""
     data = Path(path).read_bytes()
     for enc in ("utf-8-sig", "cp949"):
         try:
@@ -72,12 +79,15 @@ def load_work_result_csv(path: Path) -> dict[str, WorkResultRow]:
             continue
     else:
         raise WorkResultFormatError(f"{Path(path).name}: UTF-8·CP949로 읽을 수 없다")
-    reader = csv.DictReader(text.splitlines())
+    delimiter = "\t" if Path(path).suffix.lower() == ".tsv" else ","
+    reader = csv.DictReader(io.StringIO(text, newline=""), delimiter=delimiter)
     header = [_norm(h) for h in reader.fieldnames or []]
     if header != WORK_RESULT_CSV_COLUMNS:
         raise WorkResultFormatError(f"{Path(path).name}: 열이 {WORK_RESULT_CSV_COLUMNS}이어야 한다 (실제 {header})")
     rows = []
-    for raw in reader:
+    for row_number, raw in enumerate(reader, start=2):
+        if None in raw or any(raw.get(name) is None for name in WORK_RESULT_CSV_COLUMNS):
+            raise WorkResultFormatError(f"{Path(path).name}:{row_number}행: 열 개수가 머리글과 다르다")
         row = {_norm(k): v for k, v in raw.items()}
         rows.append(WorkResultRow(_norm(row["id"]), *(_value(row[name]) for name, _ in WORK_RESULT_FIELDS.values())))
     return _check_ids(rows, Path(path).name)
@@ -121,43 +131,169 @@ def _read_work_result_sheet(wb: Any, path: Path, DATA_COLUMNS: str, SHEET_NAME: 
 
 
 def load_work_result(path: Path) -> dict[str, WorkResultRow]:
-    """compare --with 입력: .csv면 Work 결과 CSV, .xlsx면 DataList R~V열."""
+    """compare --with 입력: .csv/.tsv면 Work 결과, .xlsx면 DataList R~V열."""
     suffix = Path(path).suffix.lower()
-    if suffix == ".csv":
+    if suffix in {".csv", ".tsv"}:
         return load_work_result_csv(path)
     if suffix == ".xlsx":
         return load_work_result_datalist(path)
-    raise WorkResultFormatError(f"Work 결과는 .csv 또는 DataList .xlsx여야 한다: {Path(path).name}")
-
-
-# --- 비교 (M5) ---
+    raise WorkResultFormatError(f"Work 결과는 .csv/.tsv 또는 DataList .xlsx여야 한다: {Path(path).name}")
 
 
 def load_final_jsonl(results_dir: Path) -> list[dict[str, Any]]:
     """03_results/03_final.jsonl을 읽는다 (API 결과, 3장 원칙 8)."""
-    raise NotImplementedError
+    path = Path(results_dir)
+    if path.is_dir():
+        path /= "03_final.jsonl"
+    if not path.is_file():
+        raise CompareError(f"API 최종 결과 파일이 없다: {path}")
+    records = []
+    seen_ids: set[str] = set()
+    for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        if not line.strip():
+            continue
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError as error:
+            raise CompareError(f"{path.name}:{line_number}: JSON 형식 오류: {error.msg}") from error
+        if not isinstance(record, dict):
+            raise CompareError(f"{path.name}:{line_number}: 레코드는 JSON 객체여야 한다")
+        raw_id = record.get("id")
+        if not isinstance(raw_id, str):
+            raise CompareError(f"{path.name}:{line_number}: id는 문자열이어야 한다")
+        row_id = _norm(raw_id)
+        if not row_id:
+            raise CompareError(f"{path.name}:{line_number}: id가 비어 있다")
+        if row_id in seen_ids:
+            raise CompareError(f"{path.name}:{line_number}: id 중복 {row_id}")
+        if not isinstance(record.get("final"), dict) or not isinstance(record.get("revision"), dict):
+            raise CompareError(f"{path.name}:{line_number}: final·revision 객체가 필요하다")
+        if "status" not in record["final"] or "regenerated_task_new" not in record["revision"]:
+            raise CompareError(f"{path.name}:{line_number}: final.status·revision.regenerated_task_new 필드가 필요하다")
+        if record["final"]["status"] is not None and not isinstance(record["final"]["status"], str):
+            raise CompareError(f"{path.name}:{line_number}: final.status는 문자열 또는 null이어야 한다")
+        if (record["revision"]["regenerated_task_new"] is not None
+                and not isinstance(record["revision"]["regenerated_task_new"], str)):
+            raise CompareError(f"{path.name}:{line_number}: revision.regenerated_task_new는 문자열 또는 null이어야 한다")
+        record["id"] = row_id
+        seen_ids.add(row_id)
+        records.append(record)
+    return records
 
 
-def g0_action_agreement(api: list[dict[str, Any]], work: dict[str, WorkResultRow]) -> dict[str, Any]:
-    """9.3: G0 action 일치율 / Cohen's kappa (id 기준). Work 판정 어휘와 action 대응은 M5에서 정한다."""
-    raise NotImplementedError
-
-
-def duplicate_pair_diff(api: list[dict[str, Any]], work: dict[str, WorkResultRow]) -> dict[str, Any]:
-    """9.3: G1 확정 중복 쌍 양방향 차이."""
-    raise NotImplementedError
-
-
-def verify_status_agreement(api: list[dict[str, Any]], work: dict[str, WorkResultRow]) -> dict[str, Any]:
-    """9.3: 양쪽 모두 평가한 행의 G2 verify_status 일치율."""
-    raise NotImplementedError
+def _api_rows(api: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    rows: dict[str, dict[str, Any]] = {}
+    for record in api:
+        raw_id = record.get("id")
+        if not isinstance(raw_id, str):
+            raise CompareError("API 결과 id는 문자열이어야 한다")
+        row_id = _norm(raw_id)
+        if not row_id:
+            raise CompareError("API 결과에 id가 비어 있는 행이 있다")
+        if row_id in rows:
+            raise CompareError(f"API 결과에 id 중복 {row_id}")
+        if not isinstance(record.get("final"), dict) or not isinstance(record.get("revision"), dict):
+            raise CompareError(f"API 결과 {row_id}: final·revision 객체가 필요하다")
+        if "status" not in record["final"] or "regenerated_task_new" not in record["revision"]:
+            raise CompareError(f"API 결과 {row_id}: final.status·revision.regenerated_task_new 필드가 필요하다")
+        if record["final"]["status"] is not None and not isinstance(record["final"]["status"], str):
+            raise CompareError(f"API 결과 {row_id}: final.status는 문자열 또는 null이어야 한다")
+        task = record["revision"]["regenerated_task_new"]
+        if task is not None and not isinstance(task, str):
+            raise CompareError(f"API 결과 {row_id}: revision.regenerated_task_new는 문자열 또는 null이어야 한다")
+        rows[row_id] = record
+    return rows
 
 
 def final_status_agreement(api: list[dict[str, Any]], work: dict[str, WorkResultRow]) -> dict[str, Any]:
-    """9.3: 최종 status 일치율."""
-    raise NotImplementedError
+    """Work AI 판정과 API final.status를 비교한다. 빈 값은 일치율 분모에서 제외한다."""
+    api_rows = _api_rows(api)
+    comparable = matching = 0
+    missing_work, missing_api, mismatches = [], [], []
+    for row_id, record in api_rows.items():
+        api_status = _value(record["final"].get("status"))
+        work_row = work.get(row_id)
+        work_status = work_row.ai_verdict if work_row else None
+        source_row = record.get("source_row")
+        if work_row is None or work_status is None:
+            missing_work.append({"id": row_id, "source_row": source_row})
+            continue
+        if api_status is None:
+            missing_api.append({"id": row_id, "source_row": source_row, "work_ai_verdict": work_status})
+            continue
+        comparable += 1
+        if api_status == work_status:
+            matching += 1
+        else:
+            mismatches.append({
+                "id": row_id, "source_row": source_row, "work_source_row": work_row.source_row,
+                "api_final_status": api_status, "work_ai_verdict": work_status,
+                "review_required": True,
+            })
+    return {
+        "api_field": "final.status",
+        "work_field": "AI 판정",
+        "compared": comparable,
+        "matching": matching,
+        "mismatching": len(mismatches),
+        "missing_work_value": missing_work,
+        "missing_api_value": missing_api,
+        "agreement_rate": round(matching / comparable, 4) if comparable else None,
+        "mismatches": mismatches,
+    }
+
+
+def regenerated_task_diff(api: list[dict[str, Any]], work: dict[str, WorkResultRow]) -> dict[str, Any]:
+    """Work Regenerate Task와 API revision.regenerated_task_new를 정규화 후 비교한다."""
+    api_rows = _api_rows(api)
+    compared = matching = 0
+    mismatches = []
+    for row_id, record in api_rows.items():
+        work_row = work.get(row_id)
+        if work_row is None:
+            continue
+        api_task = _value(record["revision"].get("regenerated_task_new"))
+        work_task = work_row.regenerated_task
+        if api_task is not None:
+            api_task = api_task.replace("\r\n", "\n").replace("\r", "\n")
+        if work_task is not None:
+            work_task = work_task.replace("\r\n", "\n").replace("\r", "\n")
+        compared += 1
+        if api_task == work_task:
+            matching += 1
+        else:
+            mismatches.append({
+                "id": row_id,
+                "source_row": record.get("source_row"),
+                "work_source_row": work_row.source_row,
+                "api_regenerated_task_new": api_task,
+                "work_regenerate_task": work_task,
+                "review_required": True,
+            })
+    return {
+        "api_field": "revision.regenerated_task_new",
+        "work_field": "Regenerate Task",
+        "compared": compared,
+        "matching": matching,
+        "mismatching": len(mismatches),
+        "agreement_rate": round(matching / compared, 4) if compared else None,
+        "mismatches": mismatches,
+    }
 
 
 def compare_results(api_results: Path, work_result: Path) -> dict[str, Any]:
-    """API 결과(03_final.jsonl)와 Work 결과(CSV 또는 DataList R~V)의 일치도 리포트. 불일치 행은 4분류 대상 (9.3)."""
-    raise NotImplementedError
+    """API final.status / regenerated task와 Work AI 판정 / regenerated task 비교 리포트."""
+    api = load_final_jsonl(api_results)
+    work = load_work_result(work_result)
+    api_rows = _api_rows(api)
+    api_ids, work_ids = set(api_rows), set(work)
+    return {
+        "schema_version": "ksco-qa/compare-1",
+        "api_records": len(api),
+        "work_records": len(work),
+        "matched_ids": len(api_ids & work_ids),
+        "api_only_ids": sorted(api_ids - work_ids),
+        "work_only_ids": sorted(work_ids - api_ids),
+        "final_status_agreement": final_status_agreement(api, work),
+        "regenerated_task_comparison": regenerated_task_diff(api, work),
+    }

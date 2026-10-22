@@ -8,6 +8,8 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
 
+from openpyxl import Workbook
+
 from ksco_qa.config import Config
 from ksco_qa.dictionaries import g0_check_keys
 from ksco_qa.llm.types import CallResult
@@ -150,6 +152,62 @@ def _append_jsonl(path: Path, records: list[dict[str, Any]]) -> None:
     with open(path, "a", encoding="utf-8", newline="\n") as stream:
         for record in records:
             stream.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+
+def write_review_workbook(
+    path: Path,
+    row_cards: list[dict[str, Any]],
+    records: list[dict[str, Any]],
+) -> None:
+    """G1·G2·G3 기록 없이 사람이 검토할 수 있는 G0 전용 시트를 만든다."""
+    cards_by_row = {int(card["source_row"]): card for card in row_cards}
+    records_by_row = {int(record["source_row"]): record for record in records}
+    if set(cards_by_row) != set(records_by_row):
+        missing = sorted(set(cards_by_row) - set(records_by_row))
+        extra = sorted(set(records_by_row) - set(cards_by_row))
+        raise ValueError(f"G0 review 행 범위가 다르다: missing={missing}, extra={extra}")
+
+    headers = [
+        "source_row", "id", "job", "job_leaf", "deliverable_title", "expected_filename", "match_status",
+        "jobinfo", "file_profile", "original_task", "action", "decided_by", "checks_json", "issues_json",
+        "reason", "evidence_loc", "regenerated_task_new", "escalated", "failure", "rule_reason",
+        "review_verdict", "review_reason",
+    ]
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "G0 Review"
+    sheet.append(headers)
+    for row in sorted(cards_by_row):
+        card = cards_by_row[row]
+        record = records_by_row[row]
+        output = record.get("output") or {}
+        sheet.append([
+            row,
+            card.get("id"),
+            card.get("job"),
+            card.get("job_leaf"),
+            card.get("deliverable_title"),
+            card.get("expected_filename"),
+            card.get("match_status"),
+            card.get("jobinfo"),
+            card.get("file_profile"),
+            card.get("original_task"),
+            record.get("action"),
+            record.get("decided_by"),
+            json.dumps(output.get("checks"), ensure_ascii=False) if output.get("checks") is not None else None,
+            json.dumps(output.get("issues"), ensure_ascii=False) if output.get("issues") is not None else None,
+            output.get("reason"),
+            output.get("evidence_loc"),
+            output.get("regenerated_task_new"),
+            record.get("escalated"),
+            record.get("failure"),
+            record.get("rule_reason"),
+            None,
+            None,
+        ])
+    destination = Path(path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    workbook.save(destination)
 
 
 async def _call(row_card: dict[str, Any], client: Any, *, attempt_kind: str = "first") -> CallResult:

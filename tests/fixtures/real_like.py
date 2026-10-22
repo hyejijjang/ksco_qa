@@ -19,7 +19,8 @@ from ksco_qa.profiler.pdf import PdfModel, PdfTable, _page
 # 손익계산서 1단계 (Ⅰ.~Ⅹ.)
 INCOME_TOP = ["매출액", "매출원가", "매출총이익", "판매비와관리비", "영업이익",
               "영업외수익", "영업외비용", "법인세비용차감전순이익", "법인세비용", "당기순이익"]
-BALANCE_TOP = ["유동자산", "비유동자산", "유동부채", "비유동부채", "자본금"]
+BALANCE_TOP = ["유동자산", "비유동자산", "유동부채", "비유동부채", "자본금",
+               "자본잉여금", "이익잉여금"]
 CASHFLOW_TOP = ["영업활동으로 인한 현금흐름", "투자활동으로 인한 현금흐름", "재무활동으로 인한 현금흐름"]
 ROMAN = "ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ"
 
@@ -30,11 +31,13 @@ SUB_ACCOUNTS = ["현금및현금성자산", "단기금융상품", "미수수익"
                 "무형자산상각비", "대손상각비", "급여", "퇴직급여", "복리후생비", "여비교통비", "지급수수료"]
 
 
-def _statement_rows(tops: list[str], children: int, rows: int, cols: int = 5) -> list[list[str | None]]:
+def _statement_rows(
+    tops: list[str], children: int, rows: int, cols: int = 5, start_level: int = 0,
+) -> list[list[str | None]]:
     """PDF 재무표 행: 1단계 "Ⅰ. 이름" 다음에 하위 "1. 세부" 행들, 금액 칸."""
     out: list[list[str | None]] = [["과 목", "제 16(당) 기", None, "제 15(전) 기", None]]
     n = 0
-    for i, top in enumerate(tops):
+    for i, top in enumerate(tops, start=start_level):
         out.append([f"{ROMAN[i]}. {top}", "", "12,345,678,901", "", "11,234,567,890"])
         for k in range(1, children + 1):
             out.append([f"{k}. {SUB_ACCOUNTS[n % len(SUB_ACCOUNTS)]}{n // len(SUB_ACCOUNTS) or ''}",
@@ -56,11 +59,13 @@ def financial_statement_pdf_model() -> PdfModel:
                     [["제 15 기", None], ["2024년 01월 01일", "부터"]], [["\"첨부된 재무제표는 당사가 작성한 것입니다.\""]],
                     [["본점 소재지 :", "(도로명주소)", "가상시 가상구 가상로 88"], ["", "(전 화)", "000-000-0000"]]]),
         2: ("재 무 상 태 표\n제16 기 2025년 12월 31일 현재\n(단위: 원)\n" + head,
-            [[["재 무 상 태 표", None]], _statement_rows(BALANCE_TOP, 3, 32)]),
-        3: (head + "\n부채와 자본", [_statement_rows(["유동부채"], 20, 29)]),
+            [[["재 무 상 태 표", None]], _statement_rows(BALANCE_TOP[:2], 15, 32)]),
+        3: (head + "\n부채와 자본",
+            [_statement_rows(BALANCE_TOP[2:], 3, 25, start_level=2)]),
         4: ("손 익 계 산 서\n제16 기 2025년 01월 01일부터 2025년 12월 31일까지\n(단위: 원)\n" + head,
-            [[["손 익 계 산 서", None]], _statement_rows(INCOME_TOP, 2, 32)]),
-        5: (head + "\n영업외수익", [_statement_rows(["영업외수익"], 15, 21)]),
+            [[["손 익 계 산 서", None]], _statement_rows(INCOME_TOP[:5], 5, 32)]),
+        5: (head + "\n영업외수익",
+            [_statement_rows(INCOME_TOP[5:], 3, 21, start_level=5)]),
         6: ("자 본 변 동 표\n(단위: 원)", [[["자 본 변 동 표", None]],
                                        [["과 목", "자 본 금", "이 익 잉 여 금", "총 계"]] + [[f"항목{i}", "1", "2", "3"] for i in range(6)]]),
         7: ("현 금 흐 름 표\n제16 기 2025년 01월 01일부터 2025년 12월 31일까지\n(단위: 원)\n" + head,

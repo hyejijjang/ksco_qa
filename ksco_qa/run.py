@@ -22,6 +22,7 @@ from ksco_qa.profiler.base import PROFILER_VERSION
 RESULTS_DIR_NAME = "03_results"
 OUTPUT_FILES_DIR = "01_output_files"
 RUN_META_NAME = "run_meta.json"
+CODE_VERSION_PATHS = ("ksco_qa", "prompts", "schemas", "dictionaries", "criteria")
 
 
 class RunError(Exception):
@@ -75,6 +76,21 @@ def input_files_hash(task_folder: Path, datalist: Path) -> str:
     return h.hexdigest()
 
 
+def code_fingerprint(root: Path | None = None) -> str:
+    """Hash versioned pipeline, prompt, schema, dictionary, and criterion inputs."""
+    repository = Path(root) if root is not None else Path(__file__).resolve().parent.parent
+    digest = hashlib.sha256()
+    for directory in CODE_VERSION_PATHS:
+        base = repository / directory
+        if not base.is_dir():
+            continue
+        for path in sorted(p for p in base.rglob("*") if p.is_file() and p.suffix.lower() != ".pyc"):
+            relative = path.relative_to(repository).as_posix()
+            digest.update(relative.encode("utf-8") + b"\0")
+            digest.update(_file_sha256(path).encode("ascii") + b"\n")
+    return digest.hexdigest()
+
+
 def make_run_id(llm: str, cfg_hash: str, in_hash: str, now: datetime, sample_n: int | None = None) -> str:
     prefix = ("mock-" if llm == "mock" else "") + (f"sample{sample_n}-" if sample_n else "")
     return f"{prefix}{now:%Y%m%d-%H%M%S}-{cfg_hash[:8]}-{in_hash[:8]}"
@@ -114,8 +130,8 @@ def prepare_run(
         "config_hash": config_hash(cfg),
         "input_hash": input_files_hash(task_folder, datalist),
         "sample_n": sample_n,
-        # 결정적 단계 코드가 바뀌면 P0 산출물이 달라지므로 새 run (추가 전용 기록과 충돌 방지)
-        "code_version": f"p0-{P0_VERSION}/profiler-{PROFILER_VERSION}",
+        # 단계 코드·프롬프트·스키마·사전이 바뀌면 이전 단계 기록을 재사용하지 않는다.
+        "code_version": f"p0-{P0_VERSION}/profiler-{PROFILER_VERSION}/{code_fingerprint()}",
     }
     work = work_root(task_folder)
 

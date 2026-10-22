@@ -64,6 +64,26 @@ def test_config_or_input_change_makes_new_run(sample_task: Path) -> None:
     assert c.run_id not in (a.run_id, b.run_id)
 
 
+def test_code_change_makes_new_run(sample_task: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import ksco_qa.run as run
+
+    versions = iter(("code-v1", "code-v2"))
+    monkeypatch.setattr(run, "code_fingerprint", lambda: next(versions))
+    first = prepare_run(sample_task, Config(), "mock", now=T0)
+    second = prepare_run(sample_task, Config(), "mock", now=T1)
+    assert first.run_id != second.run_id
+
+
+def test_explicit_resume_rejects_changed_code(sample_task: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import ksco_qa.run as run
+
+    monkeypatch.setattr(run, "code_fingerprint", lambda: "code-v1")
+    first = prepare_run(sample_task, Config(), "mock", now=T0)
+    monkeypatch.setattr(run, "code_fingerprint", lambda: "code-v2")
+    with pytest.raises(RunError, match="code_version"):
+        prepare_run(sample_task, Config(), "mock", resume=first.run_id)
+
+
 def test_mock_and_real_never_share_a_run(sample_task: Path) -> None:
     m = prepare_run(sample_task, Config(), "mock", now=T0)
     r = prepare_run(sample_task, Config(), "openai", now=T0)

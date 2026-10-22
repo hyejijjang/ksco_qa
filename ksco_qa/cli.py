@@ -8,19 +8,23 @@ API 키(OPENAI_API_KEY)는 --llm openai로 run·sample·rerun-failed를 실행�
 
 from __future__ import annotations
 
+import json
 from enum import Enum
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Annotated, NoReturn, Optional
 
 import typer
 
+from ksco_qa.compare import CompareError, WorkResultFormatError, compare_results
 from ksco_qa.config import ConfigError, require_for_model_calls, resolve_config
+from ksco_qa.estimate import estimate_run
 from ksco_qa.llm.client import BudgetExceeded, ForbiddenContext
 from ksco_qa.llm.factory import build_client
 from ksco_qa.llm.mock import MockFaults
 from ksco_qa.llm.openai_transport import ApiKeyMissing, require_api_key
-from ksco_qa.p0 import P0Stop
-from ksco_qa.pipeline import run_pipeline
+from ksco_qa.p0 import P0Stop, run_p0
+from ksco_qa.pipeline import run_g0_sample, run_pipeline
 from ksco_qa.run import RunError, prepare_run
 
 app = typer.Typer(no_args_is_help=True, add_completion=False, help="KSCO Task QA 파이프라인 (P0→G0→G1→G2→G3)")
@@ -98,7 +102,20 @@ def _start_model_run(
 @app.command()
 def estimate(task_folder: TaskFolder, config: ConfigOpt = None) -> None:
     """P0만 실행하고 호출 수·예상 토큰·예상 비용을 출력. 모델 호출 없음 (10.1, 11장)."""
-    raise NotImplementedError
+    try:
+        cfg = resolve_config(task_folder, config)
+        with TemporaryDirectory(prefix="ksco-qa-estimate-") as temp:
+            temp_dir = Path(temp)
+            p0 = run_p0(
+                task_folder,
+                cfg,
+                temp_dir,
+                temp_dir / "00_mapping_audit.csv",
+            )
+            report = estimate_run(p0.row_cards, cfg)
+    except (ConfigError, P0Stop, OSError, ValueError) as error:
+        _fail(str(error))
+    typer.echo(json.dumps(report, ensure_ascii=False, indent=2))
 
 
 @app.command()
@@ -112,6 +129,43 @@ def sample(
 ) -> None:
     """무작위 N행으로 전 단계를 실행 (별도 run) (10.1)."""
     _start_model_run(task_folder, mode=mode, llm=llm, resume=None, config=config, mock_fault=mock_fault, sample_n=n)
+
+
+@app.command("g0-sample")
+def g0_sample(
+    n: Annotated[int, typer.Argument(min=1, help="무작위로 뽑을 G0 행 수")],
+    task_folder: TaskFolder,
+    mode: ModeOpt = Mode.online,
+    llm: LlmOpt = Llm.openai,
+    mock_fault: FaultOpt = None,
+    config: ConfigOpt = None,
+) -> None:
+    """무작위 N행만 P0→G0 실행하고 G0 검토용 workbook을 만든다 (M2)."""
+    if llm is Llm.openai:
+        if mock_fault:
+            _fail("--mock-fault는 --llm mock에서만 쓸 수 있다")
+        try:
+            require_api_key()
+        except ApiKeyMissing as e:
+            _fail(str(e))
+    try:
+        faults = MockFaults.parse(mock_fault) if llm is Llm.mock else None
+        cfg = resolve_config(task_folder, config, overrides={"MODE": mode.value})
+        if llm is Llm.openai:
+            require_for_model_calls(cfg, stages=("G0",))
+        ctx = prepare_run(task_folder, cfg, llm.value, sample_n=n)
+        client = build_client(cfg, ctx, faults)
+    except (ValueError, ConfigError, RunError, P0Stop, ApiKeyMissing) as e:
+        _fail(str(e))
+    typer.echo(f"run_id: {ctx.run_id}" + ("  [MOCK — 산출물은 run 폴더 안에만]" if ctx.is_mock else ""))
+    try:
+        report = run_g0_sample(ctx, cfg, client, n)
+    except (BudgetExceeded, ForbiddenContext, P0Stop, ValueError) as e:
+        _fail(str(e))
+    typer.echo(
+        f"G0 표본 {report['sample_n']}행 완료 · 판정 {report['g0_action']} · "
+        f"검토 파일: {ctx.run_dir / report['review_workbook']}"
+    )
 
 
 @app.command()
@@ -185,10 +239,26 @@ def _resolved_overrides(run_dir: Path) -> dict:
 @app.command()
 def compare(
     task_folder: TaskFolder,
-    with_: Annotated[Path, typer.Option("--with", help="비교할 결과 폴더 (Work 결과 또는 다른 버전)")],
+    with_: Annotated[Path, typer.Option("--with", help="Work 결과 CSV/TSV 또는 DataList.xlsx")],
 ) -> None:
-    """두 결과의 일치도 리포트 (9.3, 10.1)."""
-    raise NotImplementedError
+    """Work AI 판정·재생성 Task를 최신 API 결과와 비교한다 (9.3, 10.1)."""
+    results_root = Path(task_folder) / "03_results"
+    candidates = [results_root] if (results_root / "03_final.jsonl").is_file() else []
+    work_root = results_root / "_work"
+    if work_root.is_dir():
+        candidates.extend(
+            run_dir for run_dir in work_root.iterdir()
+            if run_dir.is_dir() and (run_dir / "03_final.jsonl").is_file()
+        )
+    if not candidates:
+        _fail(f"{results_root} 또는 _work 아래에 비교할 03_final.jsonl이 없다")
+    api_results = max(candidates, key=lambda path: (path / "03_final.jsonl").stat().st_mtime_ns)
+    try:
+        report = compare_results(api_results, with_)
+    except (CompareError, WorkResultFormatError, OSError, ValueError) as error:
+        _fail(str(error))
+    report["api_results_dir"] = str(api_results)
+    typer.echo(json.dumps(report, ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":

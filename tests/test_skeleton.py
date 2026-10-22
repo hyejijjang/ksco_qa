@@ -11,6 +11,7 @@ from ksco_qa.cli import app
 
 MODULES = [
     "ksco_qa.p0",
+    "ksco_qa.pipeline",
     "ksco_qa.profiler",
     "ksco_qa.profiler.csv_file",
     "ksco_qa.profiler.spreadsheet",
@@ -43,7 +44,7 @@ runner = CliRunner()
 def test_cli_lists_all_modes() -> None:
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    for cmd in ("estimate", "sample", "run", "rerun-failed", "export", "compare"):
+    for cmd in ("estimate", "sample", "g0-sample", "run", "rerun-failed", "export", "compare"):
         assert cmd in result.output
 
 
@@ -54,11 +55,22 @@ def test_cli_run_options() -> None:
         assert opt in result.output
 
 
-@pytest.mark.parametrize("args", [["estimate", "t"], ["compare", "t", "--with", "w"]])
-def test_no_key_needed_for_non_model_commands(no_api_key, args: list[str]) -> None:
-    """키 없이도 돌아야 하는 명령: 본문 미구현(NotImplementedError)까지 가고 키 오류로 멈추지 않는다."""
-    result = runner.invoke(app, args)
-    assert isinstance(result.exception, NotImplementedError), result.output
+def test_compare_needs_no_api_key_and_reports_missing_results(no_api_key, tmp_path) -> None:
+    result = runner.invoke(app, ["compare", str(tmp_path / "task"), "--with", str(tmp_path / "work.csv")])
+    assert result.exit_code == 1
+    assert "비교할 03_final.jsonl이 없다" in result.output
+
+
+def test_estimate_runs_without_api_key(sample_task, no_api_key) -> None:
+    import json
+
+    result = runner.invoke(app, ["estimate", str(sample_task)])
+    assert result.exit_code == 0, result.output
+    report = json.loads(result.output)
+    assert report["rows"] > 0
+    assert report["total_calls_estimate"] >= report["calls"]["G0_initial"]
+    assert report["cost_usd_estimate"] is None
+    assert not (sample_task / "03_results").exists()
 
 
 @pytest.mark.parametrize(
@@ -69,6 +81,7 @@ def test_no_key_needed_for_non_model_commands(no_api_key, args: list[str]) -> No
         ["run", "t", "--stage", "G2"],
         ["sample", "30", "t"],
         ["sample", "30", "t", "--mode", "batch"],
+        ["g0-sample", "30", "t"],
         ["rerun-failed", "t"],
     ],
 )
@@ -83,6 +96,20 @@ def test_key_present_then_config_checked(monkeypatch: pytest.MonkeyPatch, sample
     result = runner.invoke(app, ["run", str(sample_task)])
     assert result.exit_code == 1 and "MODEL_G0" in result.output
     assert not (sample_task / "03_results").exists()
+
+
+def test_g0_sample_requires_only_g0_model_and_prices() -> None:
+    from ksco_qa.config import Config, ConfigError, require_for_model_calls
+
+    cfg = Config(
+        MODEL_G0="gpt-6-luna-snapshot",
+        PRICE_INPUT=1,
+        PRICE_CACHED_INPUT=0.5,
+        PRICE_OUTPUT=2,
+    )
+    require_for_model_calls(cfg, stages=("G0",))
+    with pytest.raises(ConfigError, match="MODEL_G1B, MODEL_G2"):
+        require_for_model_calls(cfg)
 
 
 @pytest.mark.parametrize(
@@ -113,6 +140,43 @@ def test_mock_needs_no_key_and_reaches_pipeline(no_api_key, sample_task, args: l
     assert (run_dir / "04_sheet_paste.xlsx").is_file()
     assert (run_dir / "run_report.json").is_file()
     assert sorted(p.name for p in (sample_task / "03_results").iterdir()) == ["_work"]
+
+
+def test_g0_sample_mock_runs_only_g0_and_writes_review_workbook(no_api_key, sample_task) -> None:
+    import json
+
+    from openpyxl import load_workbook
+
+    result = runner.invoke(app, ["g0-sample", "3", str(sample_task), "--llm", "mock"])
+    assert result.exit_code == 0, result.output
+    run_dir = next((sample_task / "03_results" / "_work").iterdir())
+    report = json.loads((run_dir / "g0_sample_report.json").read_text(encoding="utf-8"))
+    assert report["sample_n"] == 3
+    assert len(report["selected_rows"]) == 3
+    assert sum(report["g0_decided_by"].values()) == 3
+    assert set(report["g0_decided_by"]) <= {"MODEL", "RULE"}
+    assert (run_dir / "g0" / "records.jsonl").is_file()
+    calls = [
+        json.loads(line)
+        for line in (run_dir / "calls.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert calls and {call["stage"] for call in calls} == {"G0"}
+    assert not (run_dir / "g1").exists()
+    assert not (run_dir / "g2").exists()
+
+    workbook = load_workbook(run_dir / "g0_review.xlsx", read_only=True, data_only=True)
+    sheet = workbook["G0 Review"]
+    assert sheet.max_row == 4
+    headers = [cell.value for cell in sheet[1]]
+    assert headers[-2:] == ["review_verdict", "review_reason"]
+    workbook.close()
+
+
+def test_g0_sample_rejects_request_larger_than_datalist(no_api_key, sample_task) -> None:
+    result = runner.invoke(app, ["g0-sample", "99", str(sample_task), "--llm", "mock"])
+    assert result.exit_code == 1
+    assert "DataList 데이터 행은" in result.output
 
 
 def test_run_from_g2_reuses_prior_gates(no_api_key, sample_task) -> None:

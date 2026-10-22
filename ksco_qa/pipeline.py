@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import random
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -11,7 +12,7 @@ from ksco_qa.config import Config
 from ksco_qa.g3.export import run_g3
 from ksco_qa.llm.client import LLMClient, prompt_version
 from ksco_qa.p0 import find_datalist, run_p0
-from ksco_qa.stages.g0 import run_g0
+from ksco_qa.stages.g0 import run_g0, write_review_workbook
 from ksco_qa.stages.g1a import effective_tasks, generate_candidates, make_bundles, write_search_artifacts
 from ksco_qa.stages.g1b import run_g1b
 from ksco_qa.stages.g1c import run_g1c
@@ -134,3 +135,59 @@ def run_pipeline(
     }
     report = run_g3(ctx, cfg, prompt_versions, source_file=datalist.name)
     return report["status"]
+
+
+def run_g0_sample(
+    ctx: "RunContext",
+    cfg: Config,
+    client: LLMClient,
+    sample_n: int,
+) -> dict[str, Any]:
+    """감사 가능한 표본에 P0·G0만 실행하고 G1B·G2는 호출하지 않는다."""
+    if sample_n < 1:
+        raise ValueError("sample_n은 1 이상이어야 한다")
+
+    p0 = run_p0(ctx.task_folder, cfg, ctx.run_dir, ctx.run_dir / "00_mapping_audit.csv")
+    if sample_n > len(p0.row_cards):
+        raise ValueError(f"표본 {sample_n}행을 요청했지만 DataList 데이터 행은 {len(p0.row_cards)}개다")
+
+    rng = random.Random(ctx.run_id)
+    selected = sorted(rng.sample(p0.row_cards, sample_n), key=lambda card: int(card["source_row"]))
+    records = asyncio.run(run_g0(selected, cfg, ctx.run_dir, client))
+    write_review_workbook(ctx.run_dir / "g0_review.xlsx", selected, records)
+
+    action_counts: dict[str, int] = {}
+    decision_counts: dict[str, int] = {}
+    for record in records:
+        action_counts[record["action"]] = action_counts.get(record["action"], 0) + 1
+        decision = record["decided_by"]
+        decision_counts[decision] = decision_counts.get(decision, 0) + 1
+    stage_checks_path = ctx.run_dir / "g0" / "stage_checks.jsonl"
+    stage_checks = [
+        json.loads(line)
+        for line in stage_checks_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ] if stage_checks_path.is_file() else []
+    report = {
+        "run_id": ctx.run_id,
+        "llm": ctx.llm,
+        "sample_n": sample_n,
+        "sample_seed": ctx.run_id,
+        "p0_rows": len(p0.row_cards),
+        "selected_rows": [
+            {"source_row": int(card["source_row"]), "id": card["id"]}
+            for card in selected
+        ],
+        "g0_action": action_counts,
+        "g0_decided_by": decision_counts,
+        "g0_escalated_rows": [
+            int(record["source_row"]) for record in records if record.get("escalated")
+        ],
+        "stage_checks": stage_checks,
+        "review_workbook": "g0_review.xlsx",
+    }
+    (ctx.run_dir / "g0_sample_report.json").write_text(
+        json.dumps(report, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return report

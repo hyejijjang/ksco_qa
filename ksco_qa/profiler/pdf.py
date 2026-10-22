@@ -95,12 +95,76 @@ class PdfModel:
         candidates = [self.tables[j].table for j in self.page(prev).table_ids] + [self.tables[page.table_ids[0]].table]
         return prev if any(first and first == _key(table_header(t)) for t in candidates) else None
 
+    def continuation_parent(self, table_id: int) -> int | None:
+        current = self.tables[table_id]
+        page = self.page(current.page)
+        if not page.table_ids or page.table_ids[0] != table_id:
+            return None
+        previous_page = self.continues_from(current.page)
+        if previous_page is None:
+            return None
+        header = _key(table_header(current.table))
+        candidates = [
+            candidate
+            for candidate in self.page(previous_page).table_ids
+            if _key(table_header(self.tables[candidate].table)) == header
+        ]
+        return candidates[-1] if candidates else None
+
+    def continuation_group(self, table_id: int) -> list[int]:
+        while (parent := self.continuation_parent(table_id)) is not None:
+            table_id = parent
+        group = [table_id]
+        while True:
+            child = next(
+                (index for index in range(group[-1] + 1, len(self.tables))
+                 if self.continuation_parent(index) == group[-1]),
+                None,
+            )
+            if child is None:
+                return group
+            group.append(child)
+
+    def merged_table(self, table_id: int) -> DocTable:
+        """Combine a repeated-header table fragment with its page continuations."""
+        group = self.continuation_group(table_id)
+        first = self.tables[group[0]].table
+        rows = [list(row) for row in first.rows]
+        full_span = set(first.full_span_rows)
+        for index in group[1:]:
+            table = self.tables[index].table
+            incoming = table.rows
+            if incoming and first.rows and _key(table_header(table)) == _key(table_header(first)):
+                incoming = incoming[1:]
+            offset = len(rows)
+            rows.extend(list(row) for row in incoming)
+            full_span.update(offset + row for row in table.full_span_rows)
+        return DocTable(rows, first.after_paragraph, any(self.tables[index].table.merged for index in group), full_span)
+
+    def expand_detail(self, pages: set[int]) -> set[int]:
+        """Keep all physical pages of a continued table together in detailed observations."""
+        expanded = set(pages)
+        for index, table in enumerate(self.tables):
+            group = self.continuation_group(index)
+            group_pages = {self.tables[member].page for member in group}
+            if expanded & group_pages:
+                expanded.update(group_pages)
+        return expanded
+
     def detail_priority(self) -> list[int]:
         """상세 쪽 우선순위: 셀 수가 큰 표가 있는 쪽부터 (같은 쪽은 한 번), 앞 쪽 표가 이어진 쪽은 뒤로.
         표가 없으면 앞·중간·끝."""
         if self.tables:
-            order = sorted(range(len(self.tables)), key=lambda j: (-self.tables[j].cells, j))
-            pages = list(dict.fromkeys(self.tables[j].page for j in order))
+            roots = [j for j in range(len(self.tables)) if self.continuation_parent(j) is None]
+            roots.sort(key=lambda j: (
+                -max(self.tables[member].cells for member in self.continuation_group(j)),
+                j,
+            ))
+            pages = [
+                self.tables[member].page
+                for root in roots
+                for member in self.continuation_group(root)
+            ]
             return [p for p in pages if self.continues_from(p) is None] + \
                    [p for p in pages if self.continues_from(p) is not None]
         n = self.checked
@@ -122,7 +186,7 @@ class PdfModel:
         steps += [(k, True, 1, 1, LABELS_TOP_PLUS) for k in range(n - 1, 0, -1)]
         text, locations = "", []
         for k, short, rows, first_lines, labels in steps:
-            text, locations = render(self, set(priority[:k]), short, rows, first_lines, labels)
+            text, locations = render(self, self.expand_detail(set(priority[:k])), short, rows, first_lines, labels)
             if len(text) <= budget:
                 return text, locations
         return text[: max(budget - 6, 0)] + " …(생략)", locations
@@ -145,11 +209,17 @@ def _table_brief(m: PdfModel, j: int, short: bool, with_title: bool = False) -> 
     merged = " · 병합 셀 있음" if t.merged else ""
     layout = table_layout(t)
     title = f" · 제목 행: {layout.title_text(t)}" if with_title and layout.title_rows else ""
-    return f"표{j + 1} {t.n_rows}×{t.n_cols}{merged}{title} · 머리글: {table_header(t, short)}"
+    group = m.continuation_group(j)
+    continuation = ""
+    if len(group) > 1 and group[0] == j:
+        page_range = ranges([m.tables[index].page for index in group])
+        continuation = f" (p{page_range} 연결)"
+    return f"표{j + 1} {t.n_rows}×{t.n_cols}{merged}{title}{continuation} · 머리글: {table_header(t, short)}"
 
 
 def render(m: PdfModel, detail: set[int], short_headers: bool, data_rows: int, first_lines: int,
            label_max: int | str = FIRST_COL_MAX) -> tuple[str, list[str]]:
+    detail = m.expand_detail(detail)
     sparse = sum(p.sparse for p in m.pages)
     scan = " → 스캔 PDF로 보임(텍스트 판독 불가)" if m.checked and sparse / m.checked >= SCAN_RATIO else ""
     unchecked = f" (p{m.checked + 1}-p{m.n_pages} 미확인)" if m.checked < m.n_pages else ""
@@ -184,6 +254,15 @@ def render(m: PdfModel, detail: set[int], short_headers: bool, data_rows: int, f
             lines.append(f"p{p.no}: " + " · ".join([first] + briefs))
             continue
         lines.append(f"p{p.no} 상세: {first}")
+        if p.table_ids and all(m.continuation_parent(j) is not None for j in p.table_ids):
+            for j in p.table_ids:
+                parent = m.continuation_parent(j)
+                assert parent is not None
+                table = m.tables[j].table
+                lines.append(
+                    f"  표{j + 1} {table.n_rows}×{table.n_cols} · 머리글은 표{parent + 1}과 같음"
+                )
+            continue
         lines.extend(f"  {_table_brief(m, j, False, with_title=True)}" for j in p.table_ids)
         lines.extend(f"  {cell_text(l, LINE_CHARS)}" for l in p.lines[1:first_lines])
         facts = []
@@ -195,11 +274,15 @@ def render(m: PdfModel, detail: set[int], short_headers: bool, data_rows: int, f
             facts.append("단위·기준일: " + ", ".join(p.notes))
         lines.append("  " + " · ".join(facts))
         for j in p.table_ids:
-            t = m.tables[j].table
-            label = labels_line(t, label_max, indent=f"  표{j + 1} ")
+            if m.continuation_parent(j) is not None:
+                continue
+            t = m.merged_table(j)
+            group = m.continuation_group(j)
+            group_label = f"{group[0] + 1}-{group[-1] + 1} 연결" if len(group) > 1 else str(j + 1)
+            label = labels_line(t, label_max, indent=f"  표{group_label} ")
             if label:
                 lines.append(label)
-            lines.extend(data_rows_lines(t, data_rows, prefix=f"  표{j + 1} "))
+            lines.extend(data_rows_lines(t, data_rows, prefix=f"  표{group_label} "))
     return "\n".join(lines), locations
 
 

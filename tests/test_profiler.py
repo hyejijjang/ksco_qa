@@ -207,6 +207,9 @@ def test_pdf_continuation_pages() -> None:
     m.pages[2].lines[0] = "과 목  머리1 머리2 머리3 머리4"  # p3: 머리글 줄로 시작
     assert m.continues_from(3) == 2 and m.continues_from(4) is None and m.continues_from(2) is None
     assert m.detail_priority() == [7, 2, 4, 3]
+    assert m.continuation_group(0) == [0, 1]
+    assert m.merged_table(0).n_rows == 60  # repeated page header is counted once
+    assert m.expand_detail({2}) == {2, 3}
     from ksco_qa.profiler.pdf import render
 
     text, _ = render(m, {7}, True, 1, 1)
