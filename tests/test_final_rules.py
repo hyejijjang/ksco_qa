@@ -51,7 +51,8 @@ def test_rule3_g2_fail() -> None:
         ({"g1_status": None}, "G1_INCOMPLETE", "CHECK_DUPLICATE"),
         ({"g2_status": "REVIEW"}, "G2_REVIEW", "REVIEW_MANUAL"),
         ({"g2_status": None}, "G2_INCOMPLETE", "REVIEW_MANUAL"),
-        ({"g2_status": None, "g2_call_failed": True}, "G2_CALL_FAILED", "REVIEW_MANUAL"),
+        ({"g2_status": "REVIEW", "g2_failure": "CALL_FAILED"}, "G2_CALL_FAILED", "REVIEW_MANUAL"),
+        ({"g2_status": "REVIEW", "g2_failure": "VALIDATION_FAILED"}, "G2_VALIDATION_FAILED", "REVIEW_MANUAL"),
         ({"reference_mode": "UNRESOLVED_REFERENCE"}, "REFERENCE_UNRESOLVED", "CHECK_ASSETS"),
         ({"reference_readiness": "HOLD"}, "REFERENCE_HOLD", "CHECK_ASSETS"),
         ({"reference_mode": "PROVIDED_REFERENCE", "reference_conflict": True}, "REFERENCE_CONFLICT", "CHECK_ASSETS"),
@@ -130,3 +131,15 @@ def test_no_rule_matched_raises() -> None:
 def test_unknown_enum_value_rejected() -> None:
     with pytest.raises(ValueError):
         decide_final(replace(PASS_ROW, g2_status="DESIGNABLE"))
+
+
+def test_g2_failure_is_review_manual_exception() -> None:
+    """2026-10-22 결정: G2 두 번 실패 → REVIEW(RULE), next_action은 다른 원인과 상관없이 REVIEW_MANUAL."""
+    row = replace(PASS_ROW, g2_status="REVIEW", g2_failure="CALL_FAILED", reference_mode="UNRESOLVED_REFERENCE")
+    d = decide_final(row)
+    assert (d.status, d.next_action, d.reason_codes) == ("REVIEW", "REVIEW_MANUAL", ("G2_CALL_FAILED", "REFERENCE_UNRESOLVED"))
+
+
+def test_g2_failure_requires_review_status() -> None:
+    with pytest.raises(ValueError):
+        decide_final(replace(PASS_ROW, g2_failure="CALL_FAILED"))

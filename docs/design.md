@@ -24,6 +24,8 @@ ChatGPT Work에서 대화 단위로 돌리던 KSCO Task QA(P0→G0→G1→G2→G
 | 산출물 | Gate별 최종 파일 4개 + 03_final.jsonl | 03_final.xlsx, QA_SUMMARY.md, 후보·coverage CSV, 검증용 부산물 |
 | 연동 | Google Sheets·Apps Script가 읽을 JSONL 스키마 준수 | Apps Script 수정 자체 |
 
+00_Work_Run.md 7.3의 부산물 5종(00_input_snapshot.xlsx, 01_duplicate_candidates.csv, 01_duplicate_coverage.csv, 03_final.xlsx, QA_SUMMARY.md)은 만들지 않는다. run_report.json과 01_duplicate_audit.xlsx(coverage 열 포함)로 대체한다 (2026-10-22 결정).
+
 ### 성공 기준
 
 1. accounting(KSCO-33, 398행)을 명령 한 번으로 끝까지 처리한다. 사람 개입은 시작과 결과 확인뿐이다.
@@ -639,7 +641,7 @@ cost = T_in(uncached) · P_in + T_in(cached) · P_cache + (T_out + T_reasoning) 
 | 단계 | 내용 | 게이트 |
 |---|---|---|
 | M0 준비 | 모델·단가·파일 열람 방식 등 14장 결정 사항 확정, 고정 평가셋 후보 60행 선정, 실행 환경 준비 | 결정 사항 전부 확정 |
-| M1 결정적 코드 | P0 매핑·파일 프로필·row_card, G3 판정·내보내기·검증. Work 결과를 입력으로 넣어 산출물 5개 재생성 | 06 검증 통과, Apps Script가 JSONL을 읽음 |
+| M1 결정적 코드 | P0 매핑·파일 프로필·row_card, G3 판정·내보내기·검증. Work 결과는 DataList R~V열 판정뿐이라 입력으로 쓸 수 없어, 가상 단계 기록(G0·G1·G2)으로 mock run을 끝까지 돌린다 | mock run 산출물 5개 + 06 최소 검증 10항목 통과 + Apps Script가 샘플 JSONL(tests/fixtures/apps_script_sample.jsonl)을 읽음 (2026-10-22 재정의) |
 | M2 호출 기반 + G0 | 클라이언트 래퍼·재시도·호출 기록·재개, G0 프롬프트. sample 30으로 G0 실행, 사람이 판정 검토 | 직무 기준 오판·템플릿 판정 0건 |
 | M3 G1 중복 검수 | 후보 생성·묶음·쌍 판정·그룹 확정. Work의 중복 제외 105행과 비교 | 행당 후보 3~8개, 차이 나는 쌍 전부 설명 |
 | M4 G2 + 전체 연결 | G2 프롬프트, P0~G3를 한 번의 run으로 연결. accounting 398행 1회 완주, 비용·시간 실측 | 명령 한 번으로 완주, 검증 통과 |

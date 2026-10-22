@@ -40,7 +40,8 @@ class Config(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    # 단계별 모델 ID — 결정 필요 (14장 #1)
+    # 단계별 모델 ID (14장 #1, 2026-10-22 확정: GPT-6 Luna).
+    # gpt-6-luna 계열, 날짜 고정 스냅샷 ID는 키 발급 후 확정 — 그때까지 null (run 시 누락이면 오류)
     MODEL_G0: str | None = None
     MODEL_G1B: str | None = None
     MODEL_G2: str | None = None
@@ -60,7 +61,7 @@ class Config(BaseModel):
     # row_card.file_profile 예산 (행당 글자 수, 설계 7.1·부록 B). 파일이 여럿이면 나눠 쓴다
     PROFILE_MAX_CHARS: int = Field(default=1500, ge=200)
 
-    # 단가 USD / 1M 토큰 — 결정 필요 (14장 #1)
+    # 단가 USD / 1M 토큰 — 공식 단가 확인 전까지 null (run 시 누락이면 오류)
     PRICE_INPUT: float | None = Field(default=None, ge=0)
     PRICE_CACHED_INPUT: float | None = Field(default=None, ge=0)
     PRICE_OUTPUT: float | None = Field(default=None, ge=0)

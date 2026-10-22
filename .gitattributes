@@ -1,0 +1,2 @@
+# JSONL은 물리적 한 줄 = 객체 1개 (00 7.2). 체크아웃 시 CRLF로 바뀌지 않게 LF 고정
+*.jsonl text eol=lf

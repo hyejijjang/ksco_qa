@@ -52,6 +52,14 @@ def _load_xlsx(path: Path) -> list[SheetData]:
     large = path.stat().st_size > LARGE_FILE
     wb_v = openpyxl.load_workbook(path, data_only=True, read_only=large)
     wb_f = openpyxl.load_workbook(path, data_only=False, read_only=large)
+    try:  # read_only는 파일 핸들을 잡고 있으므로 꼭 닫는다 (Windows 파일 잠금)
+        return _read_xlsx_sheets(wb_v, wb_f, large)
+    finally:
+        wb_v.close()
+        wb_f.close()
+
+
+def _read_xlsx_sheets(wb_v: Any, wb_f: Any, large: bool) -> list[SheetData]:
     sheets = []
     for name in wb_v.sheetnames:
         ws_v, ws_f = wb_v[name], wb_f[name]

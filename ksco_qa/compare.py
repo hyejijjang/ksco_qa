@@ -90,6 +90,14 @@ def load_work_result_datalist(path: Path) -> dict[str, WorkResultRow]:
     from ksco_qa.p0 import DATA_COLUMNS, SHEET_NAME, is_blank, norm_id
 
     wb = openpyxl.load_workbook(path, data_only=True, read_only=True)
+    try:  # read_only는 파일 핸들을 잡고 있으므로 꼭 닫는다 (Windows 파일 잠금)
+        return _read_work_result_sheet(wb, path, DATA_COLUMNS, SHEET_NAME, is_blank, norm_id)
+    finally:
+        wb.close()
+
+
+def _read_work_result_sheet(wb: Any, path: Path, DATA_COLUMNS: str, SHEET_NAME: str, is_blank: Any,
+                            norm_id: Any) -> dict[str, WorkResultRow]:
     if SHEET_NAME not in wb.sheetnames:
         raise WorkResultFormatError(f"{Path(path).name}: '{SHEET_NAME}' 탭이 없다")
     ws = wb[SHEET_NAME]

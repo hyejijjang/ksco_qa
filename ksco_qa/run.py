@@ -144,3 +144,22 @@ def prepare_run(
     save_resolved(cfg, run_dir)
     results_dir = run_dir if llm == "mock" else task_folder / RESULTS_DIR_NAME
     return RunContext(task_folder, task_name, run_id, run_dir, results_dir, llm, sample_n)
+
+
+def open_run(task_folder: Path, run_id: str | None = None) -> RunContext:
+    """기존 run을 연다 (export 등 모델을 부르지 않는 재실행). run_id가 없으면 가장 최근 run."""
+    task_folder = Path(task_folder)
+    _, task_name = find_datalist(task_folder)
+    work = work_root(task_folder)
+    if run_id is None:
+        metas = [m for d in (work.iterdir() if work.is_dir() else []) if d.is_dir() and (m := _read_meta(d))]
+        if not metas:
+            raise RunError(f"{work}에 run이 없다 — 먼저 run을 실행")
+        run_id = max(metas, key=lambda m: m["created_at"])["run_id"]
+    run_dir = work / run_id
+    meta = _read_meta(run_dir)
+    if meta is None:
+        raise RunError(f"run이 없다: {run_id}")
+    llm = meta["llm"]
+    results_dir = run_dir if llm == "mock" else task_folder / RESULTS_DIR_NAME
+    return RunContext(task_folder, task_name, run_id, run_dir, results_dir, llm, meta.get("sample_n"))

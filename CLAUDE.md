@@ -21,6 +21,7 @@ ChatGPT Work에서 대화로 돌리던 KSCO Task QA(P0→G0→G1→G2→G3)를 �
 - 재개 기준은 설정 해시 + 입력 파일 해시. run_id의 시각은 표시용 라벨이며, `--resume <run_id>`로 명시 재개도 지원.
 - `FILE_ACCESS=profile+tools`는 online 모드에서만 허용 (Batch와 함께 쓰면 설정 검증에서 오류).
 - overlap_status의 LOW_OVERLAP은 생성 규칙이 정해질 때까지 사용하지 않는다.
+- 모델은 GPT-6 Luna로 확정 (14장 #1, 2026-10-22). MODEL_G0/G1B/G2는 gpt-6-luna 계열이며 날짜 고정 스냅샷 ID는 키 발급 후 확정 — 그때까지 설정값은 null(run 시 누락이면 오류). PRICE_*도 공식 단가 확인 전까지 null.
 
 ### M1 결정 (2026-10-21)
 입력
@@ -54,9 +55,14 @@ G3
 - 최종 판정은 00 7.1이 원문, 부록 C는 요약. 둘 다 반영: 규칙 4에 G2 미완료, 규칙 5 PASS 조건에 reference_readiness≠HOLD.
 - 규칙 4의 next_action: P0 미해결·G0 REVIEW_B·Reference 접근 불명(UNRESOLVED·HOLD·CONFLICT) → CHECK_ASSETS, G1 REVIEW·미완료 → CHECK_DUPLICATE, G2 REVIEW·미완료·호출 실패 → REVIEW_MANUAL. 원인이 여럿이면 CHECK_ASSETS > CHECK_DUPLICATE > REVIEW_MANUAL로 하나만 쓰고 원인 전부는 reason_codes에.
 - reason_codes는 06에 목록이 없어 `enums.yaml`의 `reason_code`가 유일한 목록.
+- G2가 두 번 다 실패하거나 검증에 두 번 걸린 행: verify.status=REVIEW, decided_by=RULE, reason_codes에 G2_CALL_FAILED 또는 G2_VALIDATION_FAILED, review_queue에 포함, 최종 next_action=REVIEW_MANUAL (G0와 같은 예외, 2026-10-22).
 - G0가 두 번 다 실패하거나 검증에 두 번 걸린 행: action=REVIEW_B, decided_by=RULE, reason_codes에 G0_CALL_FAILED 또는 G0_VALIDATION_FAILED, review_queue에 포함. 최종 REVIEW, next_action은 이 경우만 예외로 REVIEW_MANUAL.
 - final.execution_notes는 문자열(06에 타입 없음): "API 파이프라인; run_id=…; G0=모델/추론강도; G1B=…; G2=…; prompt=…; G2_OVERLAP_MODE=…; review_independence=SEPARATE_CALL". mock은 "API 파이프라인(MOCK)". 같은 내용을 run_report.json에 객체로도 남긴다.
 - Gate별 xlsx 추가 열은 00_Work_Run.md 4·5·6장 "행별 기록" 열 목록 그대로. 원본 서식 복사 대신 새 워크북에 값만 쓴다(원본 A~끝 열 값 + 추가 열). 수식·하이퍼링크는 source.cells에만.
+- revision.criterion = 00 4.2의 action 정의 원문, revision.conclusion = "{action}: {revision_reason 앞 150자}". NA 지표 conclusion = "해당 없음 (G0/G2 판정)". audit_completeness = COMPLETE / INCOMPLETE(미판정 후보·검색 미완료) / NOT_EVALUATED. verify_flags = G2 코드 검증 경고 목록. final.reason = "규칙 N: 원인 → 조치", 확정 중복은 대표 행 source_row와 id 함께 ("규칙 1: 확정 중복 (대표 행 2, task_0000006) → 중복 제외").
+- G3 입력 형식(단계 기록 데이터 계약)은 ksco_qa/g3/records.py. G0·G1·G2 단계는 이 형식으로 run 폴더에 쓴다.
+- 00 7.3의 부산물 5종(00_input_snapshot.xlsx, 01_duplicate_candidates.csv, 01_duplicate_coverage.csv, 03_final.xlsx, QA_SUMMARY.md)은 만들지 않는다.
+- M1 게이트(재정의): mock run 산출물 5개 + 06 최소 검증 10항목 통과 + Apps Script가 tests/fixtures/apps_script_sample.jsonl을 읽음.
 - QA_SUMMARY는 만들지 않으므로 06 최소 검증 10번은 run_report.json 집계와 대조.
 - 템플릿 감지 대상: G0 reason·issues, G1b evidence, G2 reason·issues·proposed_fix. 숫자, 해당 행의 job·job_leaf·deliverable_title, 따옴표·괄호 안 값, 공백을 지운 뒤 완전 일치로 비교.
 - overrides.jsonl 한 줄: {source_row, id, gate, field, old_value, new_value, reviewer, reason, decided_at}. 같은 (source_row, gate, field)는 마지막 줄이 이긴다.
@@ -83,6 +89,8 @@ Work 결과 비교 (M5)
 - `duplicate.candidate_pairs[]` (설계 7.4)
 - `final.execution_notes` (문자열)
 - `source_assets.deliverable_files.matched_locators[]` (여러 형식 행의 전체 경로 목록)
+- `revision.expected_reference_spec` (00 4장 행별 기록), `revision.escalated` (high 재판정 여부)
+- `verify.flags` (G2 코드 검증 경고), `final.rule` (적용된 최종 판정 규칙 번호)
 
 ## 저장소 구조
 ```

@@ -26,13 +26,16 @@ REVIEW_CAUSE_ACTION: dict[str, str] = {
     "G1_INCOMPLETE": "CHECK_DUPLICATE",
     "G2_REVIEW": "REVIEW_MANUAL",
     "G2_INCOMPLETE": "REVIEW_MANUAL",
+    # 결정 18 (G0), 2026-10-22 결정 (G2): 호출 실패·검증 2회 실패는 우선순위와 무관하게 REVIEW_MANUAL
     "G2_CALL_FAILED": "REVIEW_MANUAL",
-    # 결정 18: G0 호출 실패·검증 2회 실패는 우선순위와 무관하게 REVIEW_MANUAL
+    "G2_VALIDATION_FAILED": "REVIEW_MANUAL",
     "G0_CALL_FAILED": "REVIEW_MANUAL",
     "G0_VALIDATION_FAILED": "REVIEW_MANUAL",
 }
 ACTION_PRIORITY = ("CHECK_ASSETS", "CHECK_DUPLICATE", "REVIEW_MANUAL")
 G0_FAILURE_CODES = {"CALL_FAILED": "G0_CALL_FAILED", "VALIDATION_FAILED": "G0_VALIDATION_FAILED"}
+G2_FAILURE_CODES = {"CALL_FAILED": "G2_CALL_FAILED", "VALIDATION_FAILED": "G2_VALIDATION_FAILED"}
+FAILURE_EXCEPTION_CODES = set(G0_FAILURE_CODES.values()) | set(G2_FAILURE_CODES.values())
 
 
 class NoRuleMatched(Exception):
@@ -45,7 +48,8 @@ class FinalInputs:
 
     g0_failure: G0 호출이 두 번 실패("CALL_FAILED") 또는 검증에 두 번 걸림("VALIDATION_FAILED").
                 이때 g0_action은 REVIEW_B(decided_by=RULE) (결정 18).
-    g2_call_failed: G2 호출이 실패해 판정이 없음 (g2_status=None).
+    g2_failure: G2 호출이 두 번 실패("CALL_FAILED") 또는 검증에 두 번 걸림("VALIDATION_FAILED").
+                이때 g2_status는 REVIEW(decided_by=RULE) (2026-10-22 결정).
     """
 
     match_status: str
@@ -59,7 +63,7 @@ class FinalInputs:
     reference_conflict: bool = False
     original_task_empty: bool = False
     g0_failure: str | None = None
-    g2_call_failed: bool = False
+    g2_failure: str | None = None
 
 
 @dataclass(frozen=True)
@@ -90,10 +94,12 @@ def review_causes(x: FinalInputs) -> list[str]:
         causes.append("G1_REVIEW")
     elif x.g1_status is None or (x.g1_status == "UNIQUE" and not x.g1_search_completed):
         causes.append("G1_INCOMPLETE")
-    if x.g2_status == "REVIEW":
+    if x.g2_failure is not None:
+        causes.append(G2_FAILURE_CODES[x.g2_failure])
+    elif x.g2_status == "REVIEW":
         causes.append("G2_REVIEW")
     elif x.g2_status is None:
-        causes.append("G2_CALL_FAILED" if x.g2_call_failed else "G2_INCOMPLETE")
+        causes.append("G2_INCOMPLETE")
     if x.reference_mode == "UNRESOLVED_REFERENCE":
         causes.append("REFERENCE_UNRESOLVED")
     if x.reference_readiness == "HOLD":
@@ -104,7 +110,7 @@ def review_causes(x: FinalInputs) -> list[str]:
 
 
 def _next_action(causes: list[str]) -> str:
-    if any(c in ("G0_CALL_FAILED", "G0_VALIDATION_FAILED") for c in causes):
+    if FAILURE_EXCEPTION_CODES & set(causes):
         return "REVIEW_MANUAL"
     actions = {REVIEW_CAUSE_ACTION[c] for c in causes}
     return next(a for a in ACTION_PRIORITY if a in actions)
@@ -119,6 +125,8 @@ def decide_final(x: FinalInputs) -> FinalDecision:
     _check(x.reference_readiness, "reference_readiness", "reference_readiness")
     if x.g0_failure is not None and (x.g0_failure not in G0_FAILURE_CODES or x.g0_action != "REVIEW_B"):
         raise ValueError(f"g0_failure={x.g0_failure!r}는 g0_action=REVIEW_B와 함께만 쓴다")
+    if x.g2_failure is not None and (x.g2_failure not in G2_FAILURE_CODES or x.g2_status != "REVIEW"):
+        raise ValueError(f"g2_failure={x.g2_failure!r}는 g2_status=REVIEW와 함께만 쓴다")
 
     extra = ("ORIGINAL_TASK_EMPTY",) if x.original_task_empty else ()
 

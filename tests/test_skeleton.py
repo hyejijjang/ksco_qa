@@ -54,7 +54,7 @@ def test_cli_run_options() -> None:
         assert opt in result.output
 
 
-@pytest.mark.parametrize("args", [["estimate", "t"], ["export", "t"], ["compare", "t", "--with", "w"]])
+@pytest.mark.parametrize("args", [["estimate", "t"], ["compare", "t", "--with", "w"]])
 def test_no_key_needed_for_non_model_commands(no_api_key, args: list[str]) -> None:
     """키 없이도 돌아야 하는 명령: 본문 미구현(NotImplementedError)까지 가고 키 오류로 멈추지 않는다."""
     result = runner.invoke(app, args)
@@ -114,3 +114,25 @@ def test_mock_fault_rejected_without_mock(monkeypatch: pytest.MonkeyPatch) -> No
 def test_bad_mock_fault_value(no_api_key, sample_task) -> None:
     result = runner.invoke(app, ["run", str(sample_task), "--llm", "mock", "--mock-fault", "nope=1"])
     assert result.exit_code == 1 and "--mock-fault" in result.output
+
+
+def test_export_needs_no_key_and_reruns_g3(no_api_key, sample_task) -> None:
+    """export: 모델 호출 없이 기존 run의 G3만 다시 (키 불필요)."""
+    import json
+
+    from fixtures.gate_records import write_gate_records
+
+    result = runner.invoke(app, ["run", str(sample_task), "--llm", "mock"])
+    assert isinstance(result.exception, NotImplementedError)  # P0까지 돌고 G0에서 멈춤
+    [run_dir] = list((sample_task / "03_results" / "_work").iterdir())
+    cards = [json.loads(l) for l in (run_dir / "row_cards.jsonl").read_text(encoding="utf-8").splitlines()]
+    write_gate_records(run_dir, cards)
+    result = runner.invoke(app, ["export", str(sample_task)])
+    assert result.exit_code == 0, result.output
+    assert "G3 COMPLETED" in result.output and (run_dir / "03_final.jsonl").is_file()
+    assert sorted(p.name for p in (sample_task / "03_results").iterdir()) == ["_work"]
+
+
+def test_export_without_run_fails(no_api_key, sample_task) -> None:
+    result = runner.invoke(app, ["export", str(sample_task)])
+    assert result.exit_code == 1 and "run이 없다" in result.output

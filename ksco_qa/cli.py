@@ -154,8 +154,32 @@ def export(
     task_folder: TaskFolder,
     resume: Annotated[Optional[str], typer.Option("--resume", help="대상 run_id")] = None,
 ) -> None:
-    """G3만 다시 (overrides 반영, 스키마 수정). 모델 호출 없음 (10.1, 9.2)."""
-    raise NotImplementedError
+    """G3만 다시 (overrides 반영, 스키마 수정). 모델 호출 없음 (10.1, 9.2). --resume이 없으면 가장 최근 run."""
+    from ksco_qa.g3.export import run_g3
+    from ksco_qa.llm.client import STAGE_FILES, prompt_version
+    from ksco_qa.p0 import find_datalist
+    from ksco_qa.run import open_run
+
+    try:
+        ctx = open_run(task_folder, resume)
+        cfg = resolve_config(task_folder, overrides=_resolved_overrides(ctx.run_dir))
+        datalist, _ = find_datalist(task_folder)
+    except (ConfigError, RunError, P0Stop) as e:
+        _fail(str(e))
+    versions = {s: prompt_version(s, cfg.G2_OVERLAP_MODE if s == "G2" else None) for s in STAGE_FILES}
+    report = run_g3(ctx, cfg, versions, source_file=datalist.name)
+    failed = [name for name, errors in report["validation"].items() if errors]
+    typer.echo(f"run_id: {ctx.run_id} · G3 {report['status']} · 최종 {report['summary']['final_status']}")
+    if failed:
+        _fail("검증 실패: " + ", ".join(failed) + f" (자세한 내용: {ctx.run_id}/run_report.json)")
+
+
+def _resolved_overrides(run_dir: Path) -> dict:
+    """run 폴더의 config.resolved.yaml 값을 그대로 쓴다 (export는 그 run의 설정으로 다시 만든다)."""
+    import yaml
+
+    path = run_dir / "config.resolved.yaml"
+    return yaml.safe_load(path.read_text(encoding="utf-8")) if path.is_file() else {}
 
 
 @app.command()
