@@ -106,7 +106,8 @@ def test_mock_needs_no_key_and_reaches_pipeline(no_api_key, sample_task, args: l
     assert (run_dir / "g1" / "search.jsonl").is_file()
     assert (run_dir / "g1" / "bundles.jsonl").is_file()
     assert (run_dir / "g1" / "pairs.jsonl").is_file()
-    assert "G1b 완료" in str(result.exception)
+    assert (run_dir / "g1" / "rows.jsonl").is_file()
+    assert "G1 완료" in str(result.exception)
     assert sorted(p.name for p in (sample_task / "03_results").iterdir()) == ["_work"]
 
 
@@ -128,7 +129,7 @@ def test_export_needs_no_key_and_reruns_g3(no_api_key, sample_task) -> None:
     from fixtures.gate_records import write_gate_records
 
     result = runner.invoke(app, ["run", str(sample_task), "--llm", "mock"])
-    assert isinstance(result.exception, NotImplementedError)  # G1b까지 돌고 G1c 미구현에서 멈춤
+    assert isinstance(result.exception, NotImplementedError)  # G1까지 돌고 G2 미구현에서 멈춤
     [run_dir] = list((sample_task / "03_results" / "_work").iterdir())
     cards = [json.loads(l) for l in (run_dir / "row_cards.jsonl").read_text(encoding="utf-8").splitlines()]
     write_gate_records(run_dir, cards)

@@ -12,6 +12,7 @@ from ksco_qa.p0 import run_p0
 from ksco_qa.stages.g0 import run_g0
 from ksco_qa.stages.g1a import effective_tasks, generate_candidates, make_bundles, write_search_artifacts
 from ksco_qa.stages.g1b import run_g1b
+from ksco_qa.stages.g1c import run_g1c
 
 if TYPE_CHECKING:
     from ksco_qa.run import RunContext
@@ -77,9 +78,23 @@ def run_pipeline(
             effective=effective_tasks(p0.row_cards, g0_records),
             candidate_pairs=search["pairs"],
         ))
-        failed_pairs = sum(record.get("verdict") is None for record in pair_records)
+        g1_rows = asyncio.run(run_g1c(
+            p0.row_cards,
+            g0_records,
+            pair_records,
+            cfg,
+            ctx.run_dir,
+            client,
+            candidate_pairs=search["pairs"],
+            search_completed=bool(search["code_search_completed"] and search["semantic_search_completed"]),
+            effective=effective_tasks(p0.row_cards, g0_records),
+        ))
+        g1_statuses: dict[str, int] = {}
+        for record in g1_rows.values():
+            status = record["status"]
+            g1_statuses[status] = g1_statuses.get(status, 0) + 1
         raise NotImplementedError(
-            f"G1b 완료: 후보 {search['candidate_count']}쌍, 판정 기록 {len(pair_records)}건, "
-            f"미판정 {failed_pairs}건; G1c 이후 단계 미구현 (M3)"
+            f"G1 완료: 후보 {search['candidate_count']}쌍, 판정 기록 {len(pair_records)}건, "
+            f"행 상태 {g1_statuses}; G2 이후 단계 미구현 (M4)"
         )
     raise NotImplementedError(f"{start_stage} 단계 실행은 아직 미구현 (M3~M4)")
