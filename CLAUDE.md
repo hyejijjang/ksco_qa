@@ -62,7 +62,8 @@ G3
 - revision.criterion = 00 4.2의 action 정의 원문, revision.conclusion = "{action}: {revision_reason 앞 150자}". NA 지표 conclusion = "해당 없음 (G0/G2 판정)". audit_completeness = COMPLETE / INCOMPLETE(미판정 후보·검색 미완료) / NOT_EVALUATED. verify_flags = G2 코드 검증 경고 목록. final.reason = "규칙 N: 원인 → 조치", 확정 중복은 대표 행 source_row와 id 함께 ("규칙 1: 확정 중복 (대표 행 2, task_0000006) → 중복 제외").
 - G3 입력 형식(단계 기록 데이터 계약)은 ksco_qa/g3/records.py. G0·G1·G2 단계는 이 형식으로 run 폴더에 쓴다.
 - 00 7.3의 부산물 5종(00_input_snapshot.xlsx, 01_duplicate_candidates.csv, 01_duplicate_coverage.csv, 03_final.xlsx, QA_SUMMARY.md)은 만들지 않는다.
-- M1 게이트(재정의): mock run 산출물 5개 + 06 최소 검증 10항목 통과 + Apps Script가 tests/fixtures/apps_script_sample.jsonl을 읽음.
+- 파이프라인은 기존 검수 툴(Apps Script)이 하던 판정 자체를 대체한다. 검수 툴이 우리 JSONL을 읽는 구조가 아니다 (2026-10-22 정정). 03_final.jsonl은 06 스키마대로 계속 만든다 (기록·Work 비교용). DataList 기존 열(R=AI 판정 PASS/REVIEW/FAIL, T=Regenerate Task 등)에 붙여 넣을 04_sheet_paste.xlsx를 만든다 — 열 구성·값 형식은 KSCO-28 DataList의 R·T열 값 기준 (확정 대기).
+- M1 게이트(재정의): mock run 산출물 + 06 최소 검증 10항목 통과 + 04_sheet_paste.xlsx가 DataList 기존 열과 같은 형식.
 - QA_SUMMARY는 만들지 않으므로 06 최소 검증 10번은 run_report.json 집계와 대조.
 - 템플릿 감지 대상: G0 reason·issues, G1b evidence, G2 reason·issues·proposed_fix. 숫자, 해당 행의 job·job_leaf·deliverable_title, 따옴표·괄호 안 값, 공백을 지운 뒤 완전 일치로 비교.
 - overrides.jsonl 한 줄: {source_row, id, gate, field, old_value, new_value, reviewer, reason, decided_at}. 같은 (source_row, gate, field)는 마지막 줄이 이긴다.
@@ -82,15 +83,6 @@ Work 결과 비교 (M5)
 
 개발 환경
 - 키(OPENAI_API_KEY)는 구현이 끝난 뒤에 넣는다. 개발·검증은 `--llm mock`(MockClient)으로 한다. mock run은 run_id가 `mock-`로 시작하고 산출물은 `_work/<run_id>/` 안에만 쓴다.
-
-### Apps Script 확인 목록 (06 스키마에 없는 추가 필드·타입)
-- 각 Gate 객체의 `decided_by` (MODEL / RULE / HUMAN)
-- `verify.reference_conflict`, `verify.reference_conflict_note`
-- `duplicate.candidate_pairs[]` (설계 7.4)
-- `final.execution_notes` (문자열)
-- `source_assets.deliverable_files.matched_locators[]` (여러 형식 행의 전체 경로 목록)
-- `revision.expected_reference_spec` (00 4장 행별 기록), `revision.escalated` (high 재판정 여부)
-- `verify.flags` (G2 코드 검증 경고), `final.rule` (적용된 최종 판정 규칙 번호)
 
 ## 저장소 구조
 ```

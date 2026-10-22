@@ -21,8 +21,8 @@ ChatGPT Work에서 대화 단위로 돌리던 KSCO Task QA(P0→G0→G1→G2→G
 |---|---|---|
 | 단계 | P0 매핑, G0 수정·재생성, G1 중복 검수, G2 설계 품질 검수, G3 판정·내보내기 | 새 Deliverable 수집, Scenario·Reference·Rubric 실물 제작 |
 | 대상 | KSCO 28·33·34 등 같은 열 구조의 DataList | 열 구조나 판정 기준이 다른 검수 (별도 기준 문서 필요) |
-| 산출물 | Gate별 최종 파일 4개 + 03_final.jsonl | 03_final.xlsx, QA_SUMMARY.md, 후보·coverage CSV, 검증용 부산물 |
-| 연동 | Google Sheets·Apps Script가 읽을 JSONL 스키마 준수 | Apps Script 수정 자체 |
+| 산출물 | Gate별 최종 파일 4개 + 03_final.jsonl + 04_sheet_paste.xlsx | 03_final.xlsx, QA_SUMMARY.md, 후보·coverage CSV, 검증용 부산물 |
+| 연동 | 기존 검수 툴(Apps Script)이 하던 판정 자체를 대체. DataList 기존 열(R=AI 판정, T=Regenerate Task 등)에 붙여 넣을 04_sheet_paste.xlsx를 같은 형식으로 만들고, 03_final.jsonl은 06 스키마대로 기록·Work 비교용으로 남긴다 (2026-10-22 정정) | 검수 툴이 03_final.jsonl을 읽는 연동, Apps Script 수정 |
 
 00_Work_Run.md 7.3의 부산물 5종(00_input_snapshot.xlsx, 01_duplicate_candidates.csv, 01_duplicate_coverage.csv, 03_final.xlsx, QA_SUMMARY.md)은 만들지 않는다. run_report.json과 01_duplicate_audit.xlsx(coverage 열 포함)로 대체한다 (2026-10-22 결정).
 
@@ -221,6 +221,7 @@ P0·G1a·G1c·G3는 코드만, G0·G1b·G2는 모델 호출로 처리한다. 각
 - **규모 관리**: 목표는 행당 평균 3~8개다. 전체 쌍이 active 행 수 × 10을 넘으면 조정 가능 신호의 임계값을 0.05씩 올린다. 최종 임계값과 신호별 쌍 수를 기록한다.
 - **묶음 만들기**: 후보 그래프의 연결 요소를 기준으로 묶음당 최대 40쌍, 행 20개로 자른다. 큰 연결 요소는 쌍을 유지한 채 나눠 같은 쌍이 두 묶음에 들어가지 않게 한다.
   - Work는 배치당 120쌍이었다. API는 호출을 더 잘게 나눠 한 호출 안의 판단 수를 줄인다.
+- **중간 산출물**: `_work/g1/candidates.jsonl`에 후보 쌍과 신호, `bundles.jsonl`에 G1b 호출 묶음, `search.jsonl`에 전체 검색 범위·신호 수·최종 임계값을 추가 전용으로 기록한다.
 
 ### 5.4 G1b — 쌍 판정 (모델, 묶음 1개 = 호출 1회)
 
@@ -262,6 +263,7 @@ P0·G1a·G1c·G3는 코드만, G0·G1b·G2는 모델 호출로 처리한다. 각
 3. `02_task_verify.xlsx`와 `03_final.jsonl`을 쓴다. JSONL은 원본 1행 = 객체 1개 = 1줄이다.
 4. 검증(9장)을 돌리고 실패가 하나라도 있으면 run 상태를 FAILED_VALIDATION으로 둔다. 파일은 남기되 완료로 보고하지 않는다.
 5. `_work/run_report.json`(요약·검증·비용)을 남기고 사람이 읽을 요약을 콘솔에 출력한다.
+6. `04_sheet_paste.xlsx`는 DataList의 원래 열·값·행 순서를 유지하고, 헤더 이름으로 열을 찾아 `AI 판정`, `Regenerate Task`, `원본 Task(백업)`, `검수 메모`, `검수자`, `검수일시`만 채운다. `최종 판정`과 `태스크`는 수정하지 않는다. 검수 열이 없으면 지정 순서대로 오른쪽에 추가한다. 기본 설정 `OVERWRITE_EXISTING_REVIEW=false`에서는 검수 구간에 기존 값이 있는 행을 건너뛰고 run_report에 기록하며, true일 때만 위 6개 열을 덮어쓴다. 원본·결과 id의 행별 일치 여부와 기존 값 행 목록도 run_report에 기록한다.
 
 ---
 
@@ -394,7 +396,7 @@ O열(개인 태깅)·L·M열은 row_card에 넣지 않는다. 모델이 볼 수 
 - source.cells: A열~마지막 열을 열 문자 키로, {header, value, formula, hyperlink}.
 - duplicate: 06의 모든 필드 + candidate_pairs[](상대 행, 신호, 유사도, verdict, 근거). overlap_status는 null 금지.
 - final.execution_notes: "API 파이프라인", run_id, 단계별 모델·추론 강도, 프롬프트 버전, G2_OVERLAP_MODE, review_independence.
-- decided_by: 각 Gate 객체에 MODEL / RULE / HUMAN을 둔다. 코드가 규칙으로 정한 판정(예: NOT_FOUND → REVIEW_B, DUPLICATE → G2 SKIPPED)과 모델 판정을 구분하기 위해서다. 06 스키마에 없는 추가 필드이므로 Apps Script에서 무시되는지 확인이 필요하다.
+- decided_by: 각 Gate 객체에 MODEL / RULE / HUMAN을 둔다. 코드가 규칙으로 정한 판정(예: NOT_FOUND → REVIEW_B, DUPLICATE → G2 SKIPPED)과 모델 판정을 구분하기 위해서다. 06 스키마에 없는 추가 필드다 (03_final.jsonl은 기록·Work 비교용이라 외부 도구 호환 확인은 하지 않는다, 2026-10-22 정정).
 
 ### 7.5 enum 사전
 
@@ -626,7 +628,7 @@ cost = T_in(uncached) · P_in + T_in(cached) · P_cache + (T_out + T_reasoning) 
 | 대용량 CSV(수십 MB)·HWP 등 프로필 단계 실패 | 낮음 | 높음 | 스트리밍 읽기, 형식별 파서, 실패 시 NOT_INSPECTED로 기록하고 진행 |
 | 속도 제한·장애로 실행이 길어짐 | 낮음 | 중간 | 백오프 재시도, 재개, 동시 호출 수 자동 조절 |
 | 비용 초과 | 낮음 | 낮음 | estimate 모드로 사전 산정, BUDGET_USD 상한에서 멈춤 |
-| 최종 JSONL을 Apps Script가 읽지 못함 (추가 필드 decided_by 등) | 중간 | 중간 | M1에서 샘플 JSONL로 Apps Script 연동 먼저 확인 |
+| DataList에 붙여 넣을 결과 형식이 기존 열과 다름 (R=AI 판정, T=Regenerate Task 등) | 중간 | 중간 | 04_sheet_paste.xlsx를 KSCO-28 DataList R·T열 값 형식에 맞추고 M1 게이트에서 확인 (2026-10-22 정정: 검수 툴이 JSONL을 읽는 연동은 없음) |
 | 공공데이터지만 외부 API로 전송됨 (보안 정책) | 중간 | 낮음 | 회사의 외부 LLM API 사용 정책 확인. 비식별화 필(N열) 행은 전송 전 확인 |
 | Work 결과를 정답처럼 쓰다 Work의 오류를 따라감 | 중간 | 중간 | 불일치는 분류만 하고, 정답은 사람이 확정한 고정 평가셋으로만 정함 |
 
@@ -641,7 +643,7 @@ cost = T_in(uncached) · P_in + T_in(cached) · P_cache + (T_out + T_reasoning) 
 | 단계 | 내용 | 게이트 |
 |---|---|---|
 | M0 준비 | 모델·단가·파일 열람 방식 등 14장 결정 사항 확정, 고정 평가셋 후보 60행 선정, 실행 환경 준비 | 결정 사항 전부 확정 |
-| M1 결정적 코드 | P0 매핑·파일 프로필·row_card, G3 판정·내보내기·검증. Work 결과는 DataList R~V열 판정뿐이라 입력으로 쓸 수 없어, 가상 단계 기록(G0·G1·G2)으로 mock run을 끝까지 돌린다 | mock run 산출물 5개 + 06 최소 검증 10항목 통과 + Apps Script가 샘플 JSONL(tests/fixtures/apps_script_sample.jsonl)을 읽음 (2026-10-22 재정의) |
+| M1 결정적 코드 | P0 매핑·파일 프로필·row_card, G3 판정·내보내기·검증. Work 결과는 DataList R~V열 판정뿐이라 입력으로 쓸 수 없어, 가상 단계 기록(G0·G1·G2)으로 mock run을 끝까지 돌린다 | mock run 산출물 + 06 최소 검증 10항목 통과 + 04_sheet_paste.xlsx가 DataList 기존 열(AI 판정, Regenerate Task 등)과 같은 형식 (2026-10-22 재정의) |
 | M2 호출 기반 + G0 | 클라이언트 래퍼·재시도·호출 기록·재개, G0 프롬프트. sample 30으로 G0 실행, 사람이 판정 검토 | 직무 기준 오판·템플릿 판정 0건 |
 | M3 G1 중복 검수 | 후보 생성·묶음·쌍 판정·그룹 확정. Work의 중복 제외 105행과 비교 | 행당 후보 3~8개, 차이 나는 쌍 전부 설명 |
 | M4 G2 + 전체 연결 | G2 프롬프트, P0~G3를 한 번의 run으로 연결. accounting 398행 1회 완주, 비용·시간 실측 | 명령 한 번으로 완주, 검증 통과 |
@@ -677,7 +679,7 @@ M0에서 아래 9가지를 정해야 구현을 시작할 수 있다. 제안안�
 | 5 | id 누락 정책 | 실행 중단 / source_row를 열쇠로 진행 | 중단 (시트에서 값으로 채운 뒤 다시) | 결과를 시트에 붙일 때 안전성 |
 | 6 | 실행 환경 | 개인 PC / 사내 서버 | 개인 PC에서 시작, 정착 후 서버 | Deliverable 파일 접근, 장시간 실행 |
 | 7 | 외부 API 전송 승인 | 회사 정책 확인 필요 | M0에서 확인 | 시작 가능 여부 |
-| 8 | Apps Script 연동 | 기존 3.0 스크립트 수정 / canonical-1.0 전용 새 스크립트 | M1에서 샘플 JSONL로 먼저 확인 | 추가 필드(decided_by) 허용 여부 |
+| 8 | ~~Apps Script 연동~~ → 시트 반영 형식 | (2026-10-22 정정) 파이프라인이 검수 툴 판정을 대체하므로 JSONL 연동은 없음. DataList 기존 열에 붙여 넣을 04_sheet_paste.xlsx 형식으로 대신 | KSCO-28 DataList R·T열 값 기준 | 시트 반영 방식 |
 | 9 | 동기 vs Batch API 기본값 | online / batch | online (처음에는 실패를 바로 봐야 함) | 비용, 대기 시간 |
 
 ---

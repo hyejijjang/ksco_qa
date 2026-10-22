@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import csv
 import json
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -19,6 +20,8 @@ from ksco_qa.g3.export import (
     FINAL_JSONL,
     FINAL_OUTPUTS,
     REVISION_COLUMNS,
+    SHEET_PASTE,
+    SHEET_PASTE_REVIEW_COLUMNS,
     VERIFY_COLUMNS,
     review_queue,
     run_g3,
@@ -39,6 +42,18 @@ def g3_run(sample_task: Path):
     write_gate_records(ctx.run_dir, load_inputs(ctx.run_dir).row_cards)
     report = run_g3(ctx, cfg, {"G0": "pv0", "G1B": "pv1", "G2": "pv2"}, source_file=f"{TASK_NAME}_DataList.xlsx")
     records = [json.loads(l) for l in ctx.result_path(FINAL_JSONL).read_text(encoding="utf-8").splitlines()]
+    return ctx, report, records
+
+
+def run_g3_for_task(task: Path, cfg: Config | None = None):
+    cfg = cfg or Config()
+    ctx = prepare_run(task, cfg, "mock")
+    run_p0(task, cfg, ctx.run_dir, ctx.result_path("00_mapping_audit.csv"))
+    cards = load_inputs(ctx.run_dir).row_cards
+    write_gate_records(ctx.run_dir, cards)
+    report = run_g3(ctx, cfg, {"G0": "pv0", "G1B": "pv1", "G2": "pv2"},
+                    source_file=f"{TASK_NAME}_DataList.xlsx")
+    records = [json.loads(line) for line in ctx.result_path(FINAL_JSONL).read_text(encoding="utf-8").splitlines()]
     return ctx, report, records
 
 
@@ -126,6 +141,86 @@ def test_gate_xlsx_columns_and_values(g3_run) -> None:
     assert t002[header.index("duplicate_of_id")] == "T-001" and t002[header.index("audit_completeness")] == "COMPLETE"
     t008 = next(r for r in dup if r[1] == "T-008")
     assert t008[header.index("audit_completeness")] == "INCOMPLETE"
+
+
+@pytest.mark.parametrize("last_column", [16, 17], ids=["ends-at-P", "ends-at-Q"])
+def test_sheet_paste_adds_review_headers_and_preserves_rows(sample_task: Path, last_column: int) -> None:
+    source_path = next(sample_task.glob("*_DataList.xlsx"))
+    wb = load_workbook(source_path)
+    ws = wb["DataList"]
+    if ws.max_column > last_column:
+        ws.delete_cols(last_column + 1, ws.max_column - last_column)
+    wb.save(source_path)
+    source_wb = load_workbook(source_path, data_only=True)
+    source_ws = source_wb["DataList"]
+    original_rows = [list(row) for row in source_ws.iter_rows(
+        min_row=1, max_row=source_ws.max_row, max_col=last_column, values_only=True
+    )]
+
+    ctx, report, records = run_g3_for_task(sample_task)
+    result_wb = load_workbook(ctx.run_dir / SHEET_PASTE, data_only=True)
+    result_rows = list(result_wb["DataList"].iter_rows(values_only=True))
+    result_headers = list(result_rows[0])
+    header_index = {name: result_headers.index(name) for name in SHEET_PASTE_REVIEW_COLUMNS}
+
+    assert result_wb.sheetnames == ["DataList"]
+    assert result_headers[:last_column] == original_rows[0]
+    assert result_headers[last_column:] == list(SHEET_PASTE_REVIEW_COLUMNS)
+    assert len(result_rows) == len(original_rows)
+    assert [list(row[:last_column]) for row in result_rows] == original_rows
+    assert report["sheet_paste"]["id_validation"]["status"] == "PASS"
+    assert report["sheet_paste"]["id_validation"]["source_rows"] == DATA_ROWS
+    assert report["sheet_paste"]["row_count_validation"]["status"] == "PASS"
+    assert report["sheet_paste"]["existing_values"] == []
+    assert not report["validation"]["11_sheet_paste_identity"]
+
+    for index, record in enumerate(records, start=1):
+        row = result_rows[index]
+        assert row[header_index["AI 판정"]] == record["final"]["status"]
+        assert row[header_index["검수 메모"]] == record["final"]["reason"]
+        assert row[header_index["검수자"]] == "자동"
+        assert row[header_index["검수일시"]] == date.today().strftime("%Y. %m. %d")
+        if record["revision"]["action"] == "REGENERATE":
+            assert row[header_index["Regenerate Task"]] == record["revision"]["regenerated_task_new"]
+            assert row[header_index["원본 Task(백업)"]] == row[result_headers.index("태스크")]
+        else:
+            assert row[header_index["Regenerate Task"]] is None
+            assert row[header_index["원본 Task(백업)"]] is None
+        assert row[header_index["최종 판정"]] is None
+
+
+@pytest.mark.parametrize("overwrite", [False, True], ids=["skip-existing", "overwrite-enabled"])
+def test_sheet_paste_existing_values_are_reported_and_protected(
+    sample_task: Path, overwrite: bool
+) -> None:
+    cfg = Config(OVERWRITE_EXISTING_REVIEW=overwrite)
+    ctx, report, records = run_g3_for_task(sample_task, cfg)
+    wb = load_workbook(ctx.run_dir / SHEET_PASTE, data_only=True)
+    rows = list(wb["DataList"].iter_rows(values_only=True))
+    headers = list(rows[0])
+    columns = {name: headers.index(name) for name in headers}
+    original_wb = load_workbook(next(sample_task.glob("*_DataList.xlsx")), data_only=True)
+    original_rows = list(original_wb["DataList"].iter_rows(values_only=True))
+    original_by_id = {row[1]: row for row in original_rows[1:] if row[1] is not None}
+    records_by_id = {record["id"]: record for record in records}
+
+    existing = report["sheet_paste"]["existing_values"]
+    assert len(existing) == DATA_ROWS
+    assert all(row["status"] == "기존 값 있음" for row in existing)
+    assert all(row["action"] == ("OVERWRITTEN" if overwrite else "SKIPPED") for row in existing)
+    for row in rows[1:]:
+        rid = row[columns["id"]]
+        if rid is None:
+            continue
+        original = original_by_id[rid]
+        record = records_by_id[rid]
+        expected_ai = record["final"]["status"] if overwrite else original[17]
+        assert row[columns["AI 판정"]] == expected_ai
+        assert row[columns["최종 판정"]] == original[18]
+        assert row[columns["태스크"]] == original[6]
+    if not overwrite:
+        assert rows[1][columns["검수자"]] is None
+        assert rows[1][columns["검수일시"]] is None
 
 
 def test_run_report_summary_and_seed(g3_run) -> None:

@@ -60,6 +60,7 @@ class Config(BaseModel):
     NOT_FOUND_STOP_RATIO: float = Field(default=0.30, ge=0.0, le=1.0)
     # row_card.file_profile 예산 (행당 글자 수, 설계 7.1·부록 B). 파일이 여럿이면 나눠 쓴다
     PROFILE_MAX_CHARS: int = Field(default=1500, ge=200)
+    OVERWRITE_EXISTING_REVIEW: bool = False
 
     # 단가 USD / 1M 토큰 — 공식 단가 확인 전까지 null (run 시 누락이면 오류)
     PRICE_INPUT: float | None = Field(default=None, ge=0)

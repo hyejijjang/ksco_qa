@@ -43,6 +43,7 @@ def test_defaults_match_design_10_2(tmp_path: Path) -> None:
     assert cfg.G1_PAIRS_PER_CALL == 40
     assert cfg.NOT_FOUND_STOP_RATIO == 0.30
     assert cfg.PROFILE_MAX_CHARS == 1500
+    assert cfg.OVERWRITE_EXISTING_REVIEW is False
     assert (cfg.PRICE_INPUT, cfg.PRICE_CACHED_INPUT, cfg.PRICE_OUTPUT) == (None, None, None)
     assert cfg.BUDGET_USD is None
     assert cfg.MODE == "online"

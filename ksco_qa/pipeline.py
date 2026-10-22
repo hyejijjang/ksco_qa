@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import asyncio
+import json
+from typing import TYPE_CHECKING, Any
 
 from ksco_qa.config import Config
 from ksco_qa.llm.client import LLMClient
 from ksco_qa.p0 import run_p0
+from ksco_qa.stages.g0 import run_g0
+from ksco_qa.stages.g1a import generate_candidates, make_bundles, write_search_artifacts
 
 if TYPE_CHECKING:
     from ksco_qa.run import RunContext
@@ -30,5 +34,39 @@ def run_pipeline(
     """
     if start_stage not in STAGE_ORDER:
         raise ValueError(f"start_stage는 {STAGE_ORDER} 중 하나: {start_stage!r}")
-    run_p0(ctx.task_folder, cfg, ctx.run_dir, ctx.result_path("00_mapping_audit.csv"))
-    raise NotImplementedError("G0 이후 단계 미구현 (M2~M4)")
+    p0 = run_p0(ctx.task_folder, cfg, ctx.run_dir, ctx.result_path("00_mapping_audit.csv"))
+    if STAGE_ORDER.index(start_stage) <= STAGE_ORDER.index("G0"):
+        g0_records = asyncio.run(run_g0(p0.row_cards, cfg, ctx.run_dir, client))
+    else:
+        records_path = ctx.run_dir / "g0" / "records.jsonl"
+        if not records_path.is_file():
+            raise RuntimeError(f"{start_stage}부터 재개할 G0 기록이 없다: {records_path}")
+        latest: dict[int, dict[str, Any]] = {}
+        for line in records_path.read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                record = json.loads(line)
+                latest[int(record["source_row"])] = record
+        g0_records = [latest[int(card["source_row"])] for card in p0.row_cards if int(card["source_row"]) in latest]
+        if len(g0_records) != len(p0.row_cards):
+            raise RuntimeError(
+                f"{start_stage}부터 재개할 G0 기록이 불완전하다: {len(g0_records)}/{len(p0.row_cards)}행"
+            )
+        mismatched = [
+            int(card["source_row"])
+            for card, record in zip(p0.row_cards, g0_records)
+            if record.get("id") != card["id"]
+        ]
+        if mismatched:
+            raise RuntimeError(f"{start_stage} 재개 G0 기록의 id가 현재 입력과 다르다: {mismatched[:10]}")
+
+    if STAGE_ORDER.index(start_stage) <= STAGE_ORDER.index("G1"):
+        search = generate_candidates(p0.row_cards, g0_records, cfg)
+        bundles = make_bundles(
+            [tuple(candidate["rows"]) for candidate in search["pairs"]],
+            cfg.G1_PAIRS_PER_CALL,
+        )
+        write_search_artifacts(search, bundles, ctx.run_dir)
+        raise NotImplementedError(
+            f"G1a 완료: 후보 {search['candidate_count']}쌍, G1b 이후 단계 미구현 (M3)"
+        )
+    raise NotImplementedError(f"{start_stage} 단계 실행은 아직 미구현 (M3~M4)")

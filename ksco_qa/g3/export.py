@@ -11,14 +11,16 @@ import hashlib
 import json
 import random
 from collections import Counter
+from datetime import date
 from pathlib import Path
 from typing import Any
 
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 
 from ksco_qa.config import Config
 from ksco_qa.dictionaries import criterion_for
 from ksco_qa.g3.final_rules import FinalInputs, NoRuleMatched, decide_final
+from ksco_qa.p0 import find_datalist, is_blank, norm_header, norm_id, read_datalist
 
 SCHEMA_VERSION = "ksco-taskqa/canonical-1.0"
 CALL_STAGES = ("G0", "G1B", "G2")
@@ -26,7 +28,12 @@ SHEET_NAME = "DataList"
 
 GATE_FILES = ("00_revision_regenerate.xlsx", "01_duplicate_audit.xlsx", "02_task_verify.xlsx")
 FINAL_JSONL = "03_final.jsonl"
-FINAL_OUTPUTS = ("00_mapping_audit.csv", *GATE_FILES, FINAL_JSONL)
+SHEET_PASTE = "04_sheet_paste.xlsx"
+FINAL_OUTPUTS = ("00_mapping_audit.csv", *GATE_FILES, FINAL_JSONL, SHEET_PASTE)
+SHEET_PASTE_REVIEW_COLUMNS = (
+    "AI 판정", "최종 판정", "Regenerate Task", "원본 Task(백업)", "검수 메모", "검수자", "검수일시",
+)
+SHEET_PASTE_OUTPUT_COLUMNS = ("AI 판정", "Regenerate Task", "원본 Task(백업)", "검수 메모", "검수자", "검수일시")
 
 # Gate별 xlsx 추가 열 = 00_Work_Run.md 4·5·6장 "행별 기록" 열 목록 그대로 (G1은 audit 열 + coverage 열, 설계 5.5)
 REVISION_COLUMNS = ["source_row", "id", "revision_action", "original_task", "regenerated_task_new", "effective_task",
@@ -377,6 +384,162 @@ def write_final_jsonl(path: Path, records: list[dict[str, Any]]) -> None:
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
 
 
+def write_sheet_paste(path: Path, task_folder: Path, records: list[dict[str, Any]], *,
+                      overwrite_existing: bool) -> dict[str, Any]:
+    """DataList 원본 값과 행 순서를 유지하며 지정된 6개 검수 열만 채운다."""
+    datalist_path, _ = find_datalist(task_folder)
+    source = read_datalist(datalist_path)
+    letters = sorted(source.headers, key=lambda col: (len(col), col))
+    source_wb = load_workbook(datalist_path, data_only=True)
+    try:
+        source_ws = source_wb[SHEET_NAME]
+        original_rows = [
+            [source_ws.cell(row=row, column=column).value for column in range(1, len(letters) + 1)]
+            for row in range(1, source_ws.max_row + 1)
+        ]
+    finally:
+        source_wb.close()
+    headers = original_rows[0]
+
+    def header_index(name: str, *, required: bool = True) -> int | None:
+        matches = [i for i, value in enumerate(headers) if norm_header(value) == name]
+        if len(matches) > 1:
+            raise ValueError(f"DataList에 '{name}' 머리글이 여러 개 있다")
+        if not matches:
+            if required:
+                raise ValueError(f"DataList에 '{name}' 머리글이 없다")
+            return None
+        return matches[0]
+
+    id_index = header_index("id")
+    task_index = header_index("태스크")
+    if id_index is None or task_index is None:
+        raise ValueError("DataList의 id·태스크 머리글을 확인할 수 없다")
+    review_indices = {name: header_index(name, required=False) for name in SHEET_PASTE_REVIEW_COLUMNS}
+    for name in SHEET_PASTE_REVIEW_COLUMNS:
+        if review_indices[name] is None:
+            review_indices[name] = len(headers)
+            headers.append(name)
+
+    source_rows = source.rows
+    id_validation_mismatches = []
+    if len(source_rows) != len(records):
+        id_validation_mismatches.append({
+            "reason": "행 수 불일치",
+            "source_rows": len(source_rows),
+            "result_rows": len(records),
+        })
+    for index, (source_row, record) in enumerate(zip(source_rows, records)):
+        source_id = norm_id(source_row.values.get(letters[id_index]))
+        result_id = norm_id(record.get("id"))
+        if source_row.source_row != record.get("source_row") or source_id != result_id:
+            id_validation_mismatches.append({
+                "position": index + 1,
+                "source_row": source_row.source_row,
+                "result_source_row": record.get("source_row"),
+                "source_id": source_id,
+                "result_id": result_id,
+            })
+    id_validation = {
+        "status": "PASS" if not id_validation_mismatches else "FAIL",
+        "source_rows": len(source_rows),
+        "result_rows": len(records),
+        "mismatches": id_validation_mismatches,
+        "source_sheet_rows": len(original_rows),
+    }
+    existing_values = []
+    if id_validation_mismatches:
+        return {
+            "id_validation": id_validation,
+            "existing_values": existing_values,
+            "overwrite_existing_review": overwrite_existing,
+            "row_count_validation": {
+                "status": "NOT_EVALUATED",
+                "source_rows_including_header": len(original_rows),
+                "output_rows_including_header": None,
+            },
+            "errors": ["DataList 원본 id와 최종 결과가 행별로 일치하지 않는다"],
+        }
+
+    record_by_row = {record["source_row"]: record for record in records}
+    source_by_row = {row.source_row: row for row in source_rows}
+    run_date = date.today().strftime("%Y. %m. %d")
+    output_rows = []
+    for source_row_number, original_values in enumerate(original_rows[1:], start=2):
+        values = list(original_values)
+        values.extend([None] * (len(headers) - len(values)))
+        source_row = source_by_row.get(source_row_number)
+        record = record_by_row.get(source_row_number)
+        existing_fields = [
+            name for name in SHEET_PASTE_REVIEW_COLUMNS
+            if review_indices[name] < len(letters)
+            and not is_blank(original_values[review_indices[name]])
+        ]
+        if existing_fields:
+            existing_values.append({
+                "status": "기존 값 있음",
+                "source_row": source_row_number,
+                "id": record["id"] if record else (
+                    source_row.values.get(letters[id_index]) if source_row else None
+                ),
+                "fields": existing_fields,
+                "action": ("OVERWRITTEN" if overwrite_existing else "SKIPPED")
+                if record else "SKIPPED_NO_RESULT",
+            })
+
+        if record is None or (existing_fields and not overwrite_existing):
+            output_rows.append(values)
+            continue
+
+        revision = record["revision"]
+        generated = {
+            "AI 판정": record["final"]["status"],
+            "Regenerate Task": revision["regenerated_task_new"]
+            if revision["action"] == "REGENERATE" else None,
+            "원본 Task(백업)": source_row.values.get(letters[task_index])
+            if revision["action"] == "REGENERATE" else None,
+            "검수 메모": record["final"]["reason"],
+            "검수자": "자동",
+            "검수일시": run_date,
+        }
+        for name in SHEET_PASTE_OUTPUT_COLUMNS:
+            values[review_indices[name]] = generated[name]
+        output_rows.append(values)
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = SHEET_NAME
+    ws.append(headers)
+    for values in output_rows:
+        ws.append(values)
+    if original_rows and headers and ws.cell(len(original_rows), len(headers)).value is None:
+        ws.cell(len(original_rows), len(headers)).number_format = "@"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    wb.save(path)
+    output_wb = load_workbook(path, data_only=True, read_only=True)
+    try:
+        output_ws = output_wb[SHEET_NAME]
+        output_data_rows = sum(
+            1 for row in output_ws.iter_rows(min_row=2, values_only=True)
+            if not is_blank(row[id_index] if id_index < len(row) else None)
+        )
+    finally:
+        output_wb.close()
+    row_count_validation = {
+        "status": "PASS" if output_data_rows == len(source_rows) else "FAIL",
+        "source_data_rows": len(source_rows),
+        "output_data_rows": output_data_rows,
+    }
+    errors = [] if row_count_validation["status"] == "PASS" else ["04_sheet_paste.xlsx 데이터 행 수가 원본 DataList와 다르다"]
+    return {
+        "id_validation": id_validation,
+        "existing_values": existing_values,
+        "overwrite_existing_review": overwrite_existing,
+        "row_count_validation": row_count_validation,
+        "errors": errors,
+    }
+
+
 # --- 사람 검토 목록 (9.2) ---
 
 REVIEW_QUEUE_COLUMNS = ["source_row", "id", "categories", "revision_action", "duplicate_status", "verify_status",
@@ -492,9 +655,20 @@ def run_g3(ctx: Any, cfg: Config, prompt_versions: dict[str, str], *, source_fil
     results = {name: ctx.result_path(name) for name in FINAL_OUTPUTS}
     write_gate_files(results, records)
     write_final_jsonl(results[FINAL_JSONL], records)
+    sheet_paste = write_sheet_paste(
+        results[SHEET_PASTE], ctx.task_folder, records,
+        overwrite_existing=cfg.OVERWRITE_EXISTING_REVIEW,
+    )
 
     summary = summarize(records)
     validation = validate_all(results, inputs, summary)
+    validation["11_sheet_paste_identity"] = (
+        [] if sheet_paste["id_validation"]["status"] == "PASS" else sheet_paste["errors"]
+    )
+    validation["12_sheet_paste_row_count"] = (
+        [error for error in sheet_paste["errors"] if "행 수" in error]
+        if sheet_paste.get("row_count_validation", {}).get("status") == "FAIL" else []
+    )
     queue = review_queue(records, ctx.run_id)
     write_review_queue(ctx.run_dir / "review_queue.csv", queue)
     failed = {name: errors for name, errors in validation.items() if errors}
@@ -505,10 +679,10 @@ def run_g3(ctx: Any, cfg: Config, prompt_versions: dict[str, str], *, source_fil
                                                   prompt_versions=prompt_versions),
         "summary": summary,
         "validation": validation,
+        "sheet_paste": sheet_paste,
         "review_queue": {"rows": len(queue), "seed": f"{review_seed(ctx.run_id):016x}"},
         "usage": calls_summary(ctx.run_dir),
-        "outputs": {name: str(Path(p).name) for name, p in results.items()},
+        "outputs": {name: str(Path(p).name) for name, p in results.items() if Path(p).is_file()},
     }
     write_run_report(ctx.run_dir / "run_report.json", report)
     return report
-

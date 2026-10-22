@@ -98,10 +98,13 @@ def test_mock_needs_no_key_and_reaches_pipeline(no_api_key, sample_task, args: l
     result = runner.invoke(app, [a.format(t=sample_task) for a in args])
     assert isinstance(result.exception, NotImplementedError), result.output
     assert "MOCK" in result.output
-    [run_dir] = list((sample_task / "03_results" / "_work").iterdir())
+    run_dir = next((sample_task / "03_results" / "_work").iterdir())
     assert run_dir.name.startswith("mock-")
-    # P0는 실제로 돌고, mock 산출물은 run 폴더 안에만
+    # P0, G0, G1a까지 실제로 돌고, mock 산출물은 run 폴더 안에만 둔다.
     assert (run_dir / "00_mapping_audit.csv").is_file() and (run_dir / "row_cards.jsonl").is_file()
+    assert (run_dir / "g0" / "records.jsonl").is_file()
+    assert (run_dir / "g1" / "search.jsonl").is_file()
+    assert (run_dir / "g1" / "bundles.jsonl").is_file()
     assert sorted(p.name for p in (sample_task / "03_results").iterdir()) == ["_work"]
 
 
@@ -123,7 +126,7 @@ def test_export_needs_no_key_and_reruns_g3(no_api_key, sample_task) -> None:
     from fixtures.gate_records import write_gate_records
 
     result = runner.invoke(app, ["run", str(sample_task), "--llm", "mock"])
-    assert isinstance(result.exception, NotImplementedError)  # P0까지 돌고 G0에서 멈춤
+    assert isinstance(result.exception, NotImplementedError)  # G1a까지 돌고 G1b 미구현에서 멈춤
     [run_dir] = list((sample_task / "03_results" / "_work").iterdir())
     cards = [json.loads(l) for l in (run_dir / "row_cards.jsonl").read_text(encoding="utf-8").splitlines()]
     write_gate_records(run_dir, cards)
