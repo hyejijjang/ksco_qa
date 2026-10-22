@@ -139,7 +139,12 @@ class _Generator:
         raise ValueError(f"mock이 지원하지 않는 타입: {base}")
 
     def text(self, label: str, max_length: int | None) -> str:
-        s = f"MOCK {label} {self.rng.randrange(10**8):08d}"
+        value = self.rng.randrange(26**8)
+        suffix = ""
+        for _ in range(8):
+            value, digit = divmod(value, 26)
+            suffix = chr(ord("a") + digit) + suffix
+        s = f"MOCK {label} {suffix}"
         return s[:max_length] if max_length else s
 
 
@@ -188,15 +193,17 @@ class MockClient:
         return out
 
     @staticmethod
-    def _fill_issues(issues: dict[str, Any], checks: dict[str, str]) -> None:
+    def _fill_issues(issues: dict[str, Any], checks: dict[str, str], gen: _Generator) -> None:
         for key in issues:
-            issues[key] = f"MOCK {key} 문제" if checks.get(key) in ("R", "F") else None
+            issues[key] = gen.text(f"{key}_issue", 200) if checks.get(key) in ("R", "F") else None
 
     def _fix_g0(self, out: dict[str, Any], inp: dict[str, Any], gen: _Generator) -> None:
         out["job_evaluated"] = _find_key(inp, "job_leaf") or out["job_evaluated"]
+        if out["action"] == "KEEP" and _find_key(inp, "original_task_empty"):
+            out["action"] = "REGENERATE"
         if out["action"] == "KEEP":  # F가 있는데 KEEP 금지 (5.2)
             out["checks"] = {k: ("R" if v == "F" else v) for k, v in out["checks"].items()}
-        self._fill_issues(out["issues"], out["checks"])
+        self._fill_issues(out["issues"], out["checks"], gen)
         if out["action"] == "REGENERATE":
             out["regenerated_task_new"] = gen.text("regenerated_task_new", 1000)
         else:
@@ -243,6 +250,7 @@ class MockClient:
         reference_mode = _find_key(inp, "reference_mode")
         if reference_mode == "GENERATE_REFERENCE":
             out["reference_action"] = "GENERATE"
+            out["reference_readiness"] = "BLUEPRINT_READY"
         if reference_mode == "UNRESOLVED_REFERENCE":  # 00 6.2 기본값 + 결정: action=CHECK_ACCESS
             out["reference_action"] = "CHECK_ACCESS"
             out["reference_readiness"] = "HOLD"
@@ -252,7 +260,9 @@ class MockClient:
             out["reference_conflict_note"] = None
         elif out["reference_conflict_note"] is None:
             out["reference_conflict_note"] = gen.text("reference_conflict_note", 300)
-        self._fill_issues(out["issues"], {**overlap, **new})
+        if out["verify_status"] == "PASS" and out["b_coverage_status"] in ("MISSING", "PARTIAL_CRITICAL"):
+            out["b_coverage_status"] = "SUFFICIENT"
+        self._fill_issues(out["issues"], {**overlap, **new}, gen)
         out["proposed_fix"] = gen.text("proposed_fix", 500) if out["verify_status"] in ("REVIEW", "FAIL") else None
 
     # --- 고장 ---

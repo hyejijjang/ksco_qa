@@ -1,9 +1,4 @@
-"""MockClient로 P0→G3 전체를 fixtures 샘플로 끝까지 도는 통합 테스트.
-
-단계 로직(M1~M4)이 아직 골격이라 xfail(strict=True, raises=NotImplementedError)로 둔다.
-단계가 구현돼 통과하기 시작하면 XPASS로 실패하므로 그때 xfail을 걷어 낸다.
-NotImplementedError가 아닌 다른 오류는 바로 실패로 보고된다.
-"""
+"""MockClient로 P0→G3 전체를 fixtures 샘플로 끝까지 도는 통합 테스트."""
 
 from __future__ import annotations
 
@@ -15,7 +10,6 @@ from typer.testing import CliRunner
 
 from fixtures.sample_task import DATA_ROWS
 from ksco_qa.cli import app
-from ksco_qa.g3.validate import validate_all
 
 FINAL_OUTPUTS = (
     "00_mapping_audit.csv",
@@ -23,12 +17,12 @@ FINAL_OUTPUTS = (
     "01_duplicate_audit.xlsx",
     "02_task_verify.xlsx",
     "03_final.jsonl",
+    "04_sheet_paste.xlsx",
 )
 
 runner = CliRunner()
 
 
-@pytest.mark.xfail(strict=True, raises=NotImplementedError, reason="P0~G3 단계 로직 미구현 (M1~M4)")
 @pytest.mark.parametrize(
     "fault_args",
     [[], ["--mock-fault", "rate_limit=0.3", "--mock-fault", "schema_fail=0.2", "--mock-fault", "validation_fail=0.2"]],
@@ -61,5 +55,5 @@ def test_mock_run_end_to_end(sample_task: Path, no_api_key, fault_args: list[str
     assert {c["stage"] for c in calls} >= {"G0", "G1B", "G2"}
 
     report = json.loads((run_dir / "run_report.json").read_text(encoding="utf-8"))
-    assert report["status"] != "FAILED_VALIDATION"
-    assert all(not errors for errors in validate_all(sample_task, run_dir).values())
+    assert report["status"] == "COMPLETED"
+    assert all(not errors for errors in report["validation"].values())

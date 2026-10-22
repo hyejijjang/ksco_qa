@@ -4,20 +4,59 @@ from __future__ import annotations
 
 import asyncio
 import json
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from ksco_qa.config import Config
-from ksco_qa.llm.client import LLMClient
-from ksco_qa.p0 import run_p0
+from ksco_qa.g3.export import run_g3
+from ksco_qa.llm.client import LLMClient, prompt_version
+from ksco_qa.p0 import find_datalist, run_p0
 from ksco_qa.stages.g0 import run_g0
 from ksco_qa.stages.g1a import effective_tasks, generate_candidates, make_bundles, write_search_artifacts
 from ksco_qa.stages.g1b import run_g1b
 from ksco_qa.stages.g1c import run_g1c
+from ksco_qa.stages.g2 import run_g2
 
 if TYPE_CHECKING:
     from ksco_qa.run import RunContext
 
 STAGE_ORDER = ("P0", "G0", "G1", "G2", "G3")
+
+
+def _load_stage_records(
+    run_dir: Path,
+    stage: str,
+    row_cards: list[dict[str, Any]],
+) -> dict[int, dict[str, Any]]:
+    paths = {
+        "G0": run_dir / "g0" / "records.jsonl",
+        "G1": run_dir / "g1" / "rows.jsonl",
+        "G2": run_dir / "g2" / "records.jsonl",
+    }
+    path = paths[stage]
+    if not path.is_file():
+        raise RuntimeError(f"{stage}부터 재개할 기록이 없다: {path}")
+
+    latest: dict[int, dict[str, Any]] = {}
+    for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        if not line.strip():
+            continue
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError as error:
+            raise ValueError(f"{path}:{line_number}: JSONL 레코드가 잘못되었다") from error
+        latest[int(record["source_row"])] = record
+
+    expected = {int(card["source_row"]) for card in row_cards}
+    missing = sorted(expected - set(latest))
+    extra = sorted(set(latest) - expected)
+    if missing or extra:
+        raise RuntimeError(f"{stage} 재개 기록 범위가 현재 입력과 다르다: missing={missing[:10]}, extra={extra[:10]}")
+    expected_ids = {int(card["source_row"]): card["id"] for card in row_cards}
+    mismatched = [row for row, record in latest.items() if record.get("id") != expected_ids[row]]
+    if mismatched:
+        raise RuntimeError(f"{stage} 재개 기록의 id가 현재 입력과 다르다: {sorted(mismatched)[:10]}")
+    return latest
 
 
 def run_pipeline(
@@ -36,32 +75,15 @@ def run_pipeline(
     """
     if start_stage not in STAGE_ORDER:
         raise ValueError(f"start_stage는 {STAGE_ORDER} 중 하나: {start_stage!r}")
+    start_index = STAGE_ORDER.index(start_stage)
     p0 = run_p0(ctx.task_folder, cfg, ctx.run_dir, ctx.result_path("00_mapping_audit.csv"))
-    if STAGE_ORDER.index(start_stage) <= STAGE_ORDER.index("G0"):
+    if start_index <= STAGE_ORDER.index("G0"):
         g0_records = asyncio.run(run_g0(p0.row_cards, cfg, ctx.run_dir, client))
     else:
-        records_path = ctx.run_dir / "g0" / "records.jsonl"
-        if not records_path.is_file():
-            raise RuntimeError(f"{start_stage}부터 재개할 G0 기록이 없다: {records_path}")
-        latest: dict[int, dict[str, Any]] = {}
-        for line in records_path.read_text(encoding="utf-8").splitlines():
-            if line.strip():
-                record = json.loads(line)
-                latest[int(record["source_row"])] = record
-        g0_records = [latest[int(card["source_row"])] for card in p0.row_cards if int(card["source_row"]) in latest]
-        if len(g0_records) != len(p0.row_cards):
-            raise RuntimeError(
-                f"{start_stage}부터 재개할 G0 기록이 불완전하다: {len(g0_records)}/{len(p0.row_cards)}행"
-            )
-        mismatched = [
-            int(card["source_row"])
-            for card, record in zip(p0.row_cards, g0_records)
-            if record.get("id") != card["id"]
-        ]
-        if mismatched:
-            raise RuntimeError(f"{start_stage} 재개 G0 기록의 id가 현재 입력과 다르다: {mismatched[:10]}")
+        g0_by_row = _load_stage_records(ctx.run_dir, "G0", p0.row_cards)
+        g0_records = [g0_by_row[int(card["source_row"])] for card in p0.row_cards]
 
-    if STAGE_ORDER.index(start_stage) <= STAGE_ORDER.index("G1"):
+    if start_index <= STAGE_ORDER.index("G1"):
         search = generate_candidates(p0.row_cards, g0_records, cfg)
         bundles = make_bundles(
             [tuple(candidate["rows"]) for candidate in search["pairs"]],
@@ -89,12 +111,26 @@ def run_pipeline(
             search_completed=bool(search["code_search_completed"] and search["semantic_search_completed"]),
             effective=effective_tasks(p0.row_cards, g0_records),
         ))
-        g1_statuses: dict[str, int] = {}
-        for record in g1_rows.values():
-            status = record["status"]
-            g1_statuses[status] = g1_statuses.get(status, 0) + 1
-        raise NotImplementedError(
-            f"G1 완료: 후보 {search['candidate_count']}쌍, 판정 기록 {len(pair_records)}건, "
-            f"행 상태 {g1_statuses}; G2 이후 단계 미구현 (M4)"
-        )
-    raise NotImplementedError(f"{start_stage} 단계 실행은 아직 미구현 (M3~M4)")
+    else:
+        g1_rows = _load_stage_records(ctx.run_dir, "G1", p0.row_cards)
+
+    if start_index <= STAGE_ORDER.index("G2"):
+        asyncio.run(run_g2(
+            p0.row_cards,
+            g0_records,
+            g1_rows,
+            cfg,
+            ctx.run_dir,
+            client,
+        ))
+    else:
+        _load_stage_records(ctx.run_dir, "G2", p0.row_cards)
+
+    datalist, _ = find_datalist(ctx.task_folder)
+    prompt_versions = {
+        "G0": prompt_version("G0"),
+        "G1B": prompt_version("G1B"),
+        "G2": prompt_version("G2", cfg.G2_OVERLAP_MODE),
+    }
+    report = run_g3(ctx, cfg, prompt_versions, source_file=datalist.name)
+    return report["status"]

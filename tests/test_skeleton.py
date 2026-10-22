@@ -96,19 +96,38 @@ def test_key_present_then_config_checked(monkeypatch: pytest.MonkeyPatch, sample
 )
 def test_mock_needs_no_key_and_reaches_pipeline(no_api_key, sample_task, args: list[str]) -> None:
     result = runner.invoke(app, [a.format(t=sample_task) for a in args])
-    assert isinstance(result.exception, NotImplementedError), result.output
+    assert result.exception is None, result.output
+    assert result.exit_code == 0, result.output
     assert "MOCK" in result.output
     run_dir = next((sample_task / "03_results" / "_work").iterdir())
     assert run_dir.name.startswith("mock-")
-    # P0, G0, G1a까지 실제로 돌고, mock 산출물은 run 폴더 안에만 둔다.
+    # P0→G3까지 실제로 돌고, mock 산출물은 run 폴더 안에만 둔다.
     assert (run_dir / "00_mapping_audit.csv").is_file() and (run_dir / "row_cards.jsonl").is_file()
     assert (run_dir / "g0" / "records.jsonl").is_file()
     assert (run_dir / "g1" / "search.jsonl").is_file()
     assert (run_dir / "g1" / "bundles.jsonl").is_file()
     assert (run_dir / "g1" / "pairs.jsonl").is_file()
     assert (run_dir / "g1" / "rows.jsonl").is_file()
-    assert "G1 완료" in str(result.exception)
+    assert (run_dir / "g2" / "records.jsonl").is_file()
+    assert (run_dir / "03_final.jsonl").is_file()
+    assert (run_dir / "04_sheet_paste.xlsx").is_file()
+    assert (run_dir / "run_report.json").is_file()
     assert sorted(p.name for p in (sample_task / "03_results").iterdir()) == ["_work"]
+
+
+def test_run_from_g2_reuses_prior_gates(no_api_key, sample_task) -> None:
+    initial = runner.invoke(app, ["run", str(sample_task), "--llm", "mock"])
+    assert initial.exit_code == 0, initial.output
+    [run_dir] = list((sample_task / "03_results" / "_work").iterdir())
+    calls_path = run_dir / "calls.jsonl"
+    calls_before = calls_path.read_text(encoding="utf-8").splitlines()
+
+    resumed = runner.invoke(
+        app,
+        ["run", str(sample_task), "--stage", "G2", "--llm", "mock", "--resume", run_dir.name],
+    )
+    assert resumed.exit_code == 0, resumed.output
+    assert calls_path.read_text(encoding="utf-8").splitlines() == calls_before
 
 
 def test_mock_fault_rejected_without_mock(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -129,7 +148,7 @@ def test_export_needs_no_key_and_reruns_g3(no_api_key, sample_task) -> None:
     from fixtures.gate_records import write_gate_records
 
     result = runner.invoke(app, ["run", str(sample_task), "--llm", "mock"])
-    assert isinstance(result.exception, NotImplementedError)  # G1까지 돌고 G2 미구현에서 멈춤
+    assert result.exit_code == 0, result.output
     [run_dir] = list((sample_task / "03_results" / "_work").iterdir())
     cards = [json.loads(l) for l in (run_dir / "row_cards.jsonl").read_text(encoding="utf-8").splitlines()]
     write_gate_records(run_dir, cards)

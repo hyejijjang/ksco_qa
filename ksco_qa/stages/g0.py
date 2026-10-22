@@ -45,6 +45,12 @@ def validate_output(row_card: dict[str, Any], output: dict[str, Any]) -> list[st
 
     action = output.get("action")
     checks = output.get("checks") or {}
+    if action == "KEEP" and (
+        row_card.get("original_task_empty")
+        or not isinstance(row_card.get("original_task"), str)
+        or not row_card["original_task"].strip()
+    ):
+        errors.append("ORIGINAL_TASK_EMPTY인데 action이 KEEP이다")
     if action == "KEEP" and "F" in checks.values():
         errors.append("하나 이상의 차원이 F인데 action이 KEEP이다")
     if action == "REGENERATE":

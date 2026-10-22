@@ -59,6 +59,10 @@ def test_validate_output_checks_job_keep_regenerate_and_duplicate_issues(sample_
     regenerate["regenerated_task_new"] = card["original_task"]
     assert any("original_task와 같다" in error for error in validate_output(card, regenerate))
 
+    empty_card = card | {"original_task": None, "original_task_empty": True}
+    empty_keep = g0_output(empty_card, "KEEP")
+    assert any("ORIGINAL_TASK_EMPTY" in error for error in validate_output(empty_card, empty_keep))
+
 
 def test_escalation_conditions() -> None:
     assert needs_escalation({"action": "KEEP"}, ["job mismatch"])

@@ -67,6 +67,19 @@ def test_g0_default_passes_code_rules() -> None:
             assert (out["issues"][k] is not None) == (v in ("R", "F"))
 
 
+@pytest.mark.parametrize("stage", ["G0", "G2"])
+def test_issue_text_is_unique_per_call(stage: str) -> None:
+    texts: dict[str, list[str]] = {}
+    for i in range(100):
+        out = json.loads(create(MockClient(), request(stage, cid(i + 2500))).text)
+        for key, text in out["issues"].items():
+            if text is not None:
+                texts.setdefault(key, []).append(text)
+
+    assert any(len(values) >= 2 for values in texts.values())
+    assert all(len(values) == len(set(values)) for values in texts.values())
+
+
 def test_g1b_covers_every_input_pair_once() -> None:
     out = json.loads(create(MockClient(), request("G1B", cid(7))).text)
     assert [[p["row_1"], p["row_2"]] for p in out["pairs"]] == G1B_INPUT["pairs"]
