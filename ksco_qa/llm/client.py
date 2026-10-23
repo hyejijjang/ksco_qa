@@ -213,8 +213,10 @@ class LLMClient:
         forbidden_terms: tuple[str, ...] = (),
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
         rng: random.Random | None = None,
+        progress: Any = None,
     ) -> None:
         self._cfg = cfg
+        self.progress = progress  # ksco_qa.progress.Progress (없으면 진행 표시 안 함)
         self._run_dir = Path(run_dir)
         self._log = log_writer
         self._transport = transport
@@ -276,11 +278,36 @@ class LLMClient:
         if attempt_kind not in ("first", "escalate"):
             raise ValueError("attempt_kind는 first 또는 escalate (feedback은 래퍼가 정한다)")
         effort = reasoning_effort or self.effort_for(stage)
-        result = await self._call_with_schema_retry(stage, str(unit_id), variable_input, effort, attempt_kind, None, validator)
-        if result.status != "VALIDATION_FAIL":
-            return result
-        return await self._call_with_schema_retry(
-            stage, str(unit_id), variable_input, effort, "feedback", result.validation_errors, validator
+        if self.progress is not None:
+            self.progress.call_started(stage)
+        results: list[CallResult] = []
+        try:
+            result = await self._call_with_schema_retry(
+                stage, str(unit_id), variable_input, effort, attempt_kind, None, validator, results
+            )
+            if result.status == "VALIDATION_FAIL":
+                result = await self._call_with_schema_retry(
+                    stage, str(unit_id), variable_input, effort, "feedback", result.validation_errors, validator,
+                    results,
+                )
+        finally:
+            self._report_progress(stage, results)
+        return result
+
+    def _report_progress(self, stage: str, results: list["CallResult"]) -> None:
+        """call() 1회(스키마 재호출·피드백 재호출 포함)를 진행 표시에 1건으로 반영한다. 토큰·비용은 실측 usage만."""
+        if self.progress is None:
+            return
+        usages = [r.usage for r in results if r.usage is not None]
+        costs = [compute_cost(u, self._cfg) for u in usages]
+        last = results[-1] if results else None
+        self.progress.call_finished(
+            stage,
+            failed=last is None or last.status not in SUCCESS_STATUSES,
+            reused=bool(results) and all(r.from_cache for r in results),
+            input_tokens=sum(u.input for u in usages),
+            output_tokens=sum(u.output + u.reasoning for u in usages),
+            cost=None if any(c is None for c in costs) else sum(costs),
         )
 
     async def _call_with_schema_retry(
@@ -292,7 +319,9 @@ class LLMClient:
         attempt_kind: str,
         feedback: list[str] | None,
         validator: Validator | None,
+        results: list["CallResult"] | None = None,
     ) -> CallResult:
+        results = results if results is not None else []
         model = self.model_for(stage)
         mode = self._cfg.G2_OVERLAP_MODE if stage == "G2" else None
         messages = build_messages(stage, variable_input, feedback, mode)
@@ -305,14 +334,18 @@ class LLMClient:
         )
         cached = self._from_log(call_id, attempt_kind)
         if cached is not None:
+            results.append(cached)
             return cached
         common = dict(stage=stage, unit_id=unit_id, model=model, effort=effort, attempt_kind=attempt_kind,
                       messages=messages, variable_input=variable_input, call_id=call_id, pv=pv, ih=ih,
                       validator=validator)
         result = await self._attempt(**common, final=False)
+        results.append(result)
         if result.status != "SCHEMA_FAIL":
             return result
-        return await self._attempt(**common, final=True)
+        result = await self._attempt(**common, final=True)
+        results.append(result)
+        return result
 
     def _from_log(self, call_id: str, attempt_kind: str) -> CallResult | None:
         """재개: 성공 기록이나 확정된 VALIDATION_FAIL이 있으면 다시 호출하지 않는다."""

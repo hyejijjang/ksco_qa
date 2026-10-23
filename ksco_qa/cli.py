@@ -94,9 +94,12 @@ def _start_model_run(
         _fail(str(e))
     typer.echo(f"run_id: {ctx.run_id}" + ("  [MOCK — 산출물은 run 폴더 안에만]" if ctx.is_mock else ""))
     try:
-        run_pipeline(ctx, cfg, client, start_stage=start_stage, rerun_failed=rerun_failed)
+        status = run_pipeline(ctx, cfg, client, start_stage=start_stage, rerun_failed=rerun_failed)
     except (BudgetExceeded, ForbiddenContext, P0Stop) as e:
         _fail(str(e))
+    if client.progress is not None:
+        typer.echo(f"run 완료 — G3 {status} · 이번 실행 비용 ${client.progress.total_cost():.4f} "
+                   f"(실측 합계: {ctx.run_id}/run_report.json)")
 
 
 @app.command()

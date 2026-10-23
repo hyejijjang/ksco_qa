@@ -60,6 +60,13 @@ def _load_stage_records(
     return latest
 
 
+def _flush_progress(client: LLMClient, note: str | None = None) -> None:
+    """단계가 끝나면 진행 막대를 지우고 단계 요약 한 줄을 남긴다 (10.4)."""
+    progress = getattr(client, "progress", None)
+    if progress is not None:
+        progress.flush(note)
+
+
 def run_pipeline(
     ctx: "RunContext",
     cfg: Config,
@@ -80,6 +87,7 @@ def run_pipeline(
     p0 = run_p0(ctx.task_folder, cfg, ctx.run_dir, ctx.result_path("00_mapping_audit.csv"))
     if start_index <= STAGE_ORDER.index("G0"):
         g0_records = asyncio.run(run_g0(p0.row_cards, cfg, ctx.run_dir, client))
+        _flush_progress(client)
     else:
         g0_by_row = _load_stage_records(ctx.run_dir, "G0", p0.row_cards)
         g0_records = [g0_by_row[int(card["source_row"])] for card in p0.row_cards]
@@ -101,6 +109,7 @@ def run_pipeline(
             effective=effective_tasks(p0.row_cards, g0_records),
             candidate_pairs=search["pairs"],
         ))
+        _flush_progress(client)
         g1_rows = asyncio.run(run_g1c(
             p0.row_cards,
             g0_records,
@@ -112,6 +121,7 @@ def run_pipeline(
             search_completed=bool(search["code_search_completed"] and search["semantic_search_completed"]),
             effective=effective_tasks(p0.row_cards, g0_records),
         ))
+        _flush_progress(client, "G1c 누락 쌍 재판정")
     else:
         g1_rows = _load_stage_records(ctx.run_dir, "G1", p0.row_cards)
 
@@ -124,6 +134,7 @@ def run_pipeline(
             ctx.run_dir,
             client,
         ))
+        _flush_progress(client)
     else:
         _load_stage_records(ctx.run_dir, "G2", p0.row_cards)
 
@@ -154,6 +165,7 @@ def run_g0_sample(
     rng = random.Random(ctx.run_id)
     selected = sorted(rng.sample(p0.row_cards, sample_n), key=lambda card: int(card["source_row"]))
     records = asyncio.run(run_g0(selected, cfg, ctx.run_dir, client))
+    _flush_progress(client)
     write_review_workbook(ctx.run_dir / "g0_review.xlsx", selected, records)
 
     action_counts: dict[str, int] = {}
