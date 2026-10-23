@@ -7,6 +7,7 @@ API 키는 실제 API를 부르는 실행에서만 확인한다. import·테스�
 
 from __future__ import annotations
 
+import asyncio
 import os
 from typing import Any
 
@@ -40,15 +41,26 @@ class OpenAITransport:
     """Responses API + structured outputs(strict). 재시도는 래퍼가 하므로 SDK 재시도는 끈다."""
 
     def __init__(self, api_key: str) -> None:
+        self._api_key = api_key
+        self._client: Any = None
+        self._client_loop: asyncio.AbstractEventLoop | None = None
+
+    def _client_for_loop(self) -> Any:
+        """단계마다 asyncio.run으로 루프가 바뀌므로, 루프가 바뀌면 클라이언트를 새로 만든다.
+        AsyncOpenAI의 연결은 처음 쓴 루프에 묶여 있어 닫힌 루프의 연결을 다시 쓰면 실패한다."""
         from openai import AsyncOpenAI
 
-        self._client = AsyncOpenAI(api_key=api_key, max_retries=0)
+        loop = asyncio.get_running_loop()
+        if self._client is None or self._client_loop is not loop:
+            self._client = AsyncOpenAI(api_key=self._api_key, max_retries=0)
+            self._client_loop = loop
+        return self._client
 
     async def create(self, request: LLMRequest) -> RawResponse:
         import openai
 
         try:
-            resp = await self._client.responses.create(
+            resp = await self._client_for_loop().responses.create(
                 model=request.model,
                 reasoning={"effort": request.reasoning_effort},
                 input=request.messages,

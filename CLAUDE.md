@@ -21,7 +21,7 @@ ChatGPT Work에서 대화로 돌리던 KSCO Task QA(P0→G0→G1→G2→G3)를 �
 - 재개 기준은 설정 해시 + 입력 파일 해시. run_id의 시각은 표시용 라벨이며, `--resume <run_id>`로 명시 재개도 지원.
 - `FILE_ACCESS=profile+tools`는 online 모드에서만 허용 (Batch와 함께 쓰면 설정 검증에서 오류).
 - overlap_status의 LOW_OVERLAP은 생성 규칙이 정해질 때까지 사용하지 않는다.
-- 모델은 GPT-6 Luna로 확정 (14장 #1, 2026-10-22). MODEL_G0/G1B/G2는 gpt-6-luna 계열이며 날짜 고정 스냅샷 ID는 키 발급 후 확정 — 그때까지 설정값은 null(run 시 누락이면 오류). PRICE_*도 공식 단가 확인 전까지 null.
+- 모델은 GPT-6 Luna로 확정 (14장 #1, 2026-10-22). MODEL_G0/G1B/G2 = `gpt-6-luna` (2026-10-23 확정: 공식 문서에 날짜 고정 스냅샷이 없어 별칭 사용. 실제 응답 모델은 raw 응답에 남음). 단가 = OpenAI 공식 Standard 0.10 / 0.01 / 0.50 USD per 1M (입력 272K 이하, 2026-10-23 확인). 코드 기본값은 null로 두고 Task 폴더 task_config.yaml 또는 --config로 넣는다(run 시 누락이면 오류). 캐시 쓰기 요금($0.125/1M)은 usage에 없어 비용에 반영하지 않는다.
 
 ### M1 결정 (2026-10-21)
 입력

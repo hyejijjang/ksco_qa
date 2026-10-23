@@ -41,7 +41,7 @@ class Config(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     # 단계별 모델 ID (14장 #1, 2026-10-22 확정: GPT-6 Luna).
-    # gpt-6-luna 계열, 날짜 고정 스냅샷 ID는 키 발급 후 확정 — 그때까지 null (run 시 누락이면 오류)
+    # gpt-6-luna (2026-10-23, 날짜 고정 스냅샷 없음). 기본값 null — task_config.yaml·--config로 넣는다 (run 시 누락이면 오류)
     MODEL_G0: str | None = None
     MODEL_G1B: str | None = None
     MODEL_G2: str | None = None
@@ -62,7 +62,7 @@ class Config(BaseModel):
     PROFILE_MAX_CHARS: int = Field(default=1500, ge=200)
     OVERWRITE_EXISTING_REVIEW: bool = False
 
-    # 단가 USD / 1M 토큰 — 공식 단가 확인 전까지 null (run 시 누락이면 오류)
+    # 단가 USD / 1M 토큰 (공식 Standard 0.10 / 0.01 / 0.50, 2026-10-23). 기본값 null (run 시 누락이면 오류)
     PRICE_INPUT: float | None = Field(default=None, ge=0)
     PRICE_CACHED_INPUT: float | None = Field(default=None, ge=0)
     PRICE_OUTPUT: float | None = Field(default=None, ge=0)

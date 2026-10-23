@@ -323,7 +323,8 @@ def test_openai_error_mapping(error, expected) -> None:
     async def raise_error(**kwargs):
         raise error()
 
-    transport._client = SimpleNamespace(responses=SimpleNamespace(create=raise_error))
+    fake = SimpleNamespace(responses=SimpleNamespace(create=raise_error))
+    transport._client_for_loop = lambda: fake
     req = SimpleNamespace(model="m", reasoning_effort="medium", messages=[], schema_name="g0", schema={})
     kind, retry_after = expected
     if kind == "timeout":
@@ -333,3 +334,32 @@ def test_openai_error_mapping(error, expected) -> None:
         with pytest.raises(TransientError) as e:
             asyncio.run(transport.create(req))
         assert e.value.retry_after == retry_after
+
+
+def test_openai_transport_new_client_per_event_loop(monkeypatch) -> None:
+    """단계마다 asyncio.run으로 루프가 바뀐다. 닫힌 루프에 묶인 클라이언트를 다시 쓰면 안 된다 (G0 → G1B 실 run에서 실패)."""
+    created = []
+
+    class FakeAsyncOpenAI:
+        def __init__(self, **kwargs):
+            self.loop = asyncio.get_running_loop()
+            created.append(self)
+            self.responses = SimpleNamespace(create=self._create)
+
+        async def _create(self, **kwargs):
+            if asyncio.get_running_loop() is not self.loop:
+                raise RuntimeError("Event loop is closed")
+            return SimpleNamespace(output=[], usage=None, output_text="{}",
+                                   model_dump=lambda mode: {})
+
+    monkeypatch.setattr(openai, "AsyncOpenAI", FakeAsyncOpenAI)
+    transport = OpenAITransport("sk-test")
+    req = SimpleNamespace(model="m", reasoning_effort="medium", messages=[], schema_name="g0", schema={})
+
+    async def two_calls():
+        await transport.create(req)
+        await transport.create(req)
+
+    asyncio.run(two_calls())
+    asyncio.run(transport.create(req))
+    assert len(created) == 2

@@ -605,7 +605,7 @@ cost = T_in(uncached) · P_in + T_in(cached) · P_cache + (T_out + T_reasoning) 
 
 | 단가 가정 (입력 / 캐시 / 출력, USD per 1M) | accounting 1회 비용 | 비고 |
 |---|---|---|
-| 0.10 / 0.01 / 0.50 | 약 $1.5 | Artificial Analysis에 게시된 GPT-6 Luna (high) 단가 기준. 실제 요금제 확인 필요 |
+| 0.10 / 0.01 / 0.50 | 약 $1.5 | OpenAI 공식 GPT-6 Luna Standard 단가 (입력 272K 이하, 2026-10-23 확인). Batch는 절반 |
 | 2.00 / 0.20 / 8.00 | 약 $25 | 가상 단가. 고성능 모델을 쓸 경우의 크기 감 |
 
 - 비용의 대부분은 출력·추론 토큰에서 나온다. 출력 다이어트와 단계별 추론 강도가 가장 큰 절감 수단이다.
