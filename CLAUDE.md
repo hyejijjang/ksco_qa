@@ -21,6 +21,11 @@ ChatGPT Work에서 대화로 돌리던 KSCO Task QA(P0→G0→G1→G2→G3)를 �
 - 재개 기준은 설정 해시 + 입력 파일 해시. run_id의 시각은 표시용 라벨이며, `--resume <run_id>`로 명시 재개도 지원.
 - `FILE_ACCESS=profile+tools`는 online 모드에서만 허용 (Batch와 함께 쓰면 설정 검증에서 오류).
 - overlap_status의 LOW_OVERLAP은 생성 규칙이 정해질 때까지 사용하지 않는다.
+
+### 2026-10-23 결정
+- `FILE_ACCESS=fulltext`(비교 실험용): 행의 추정 토큰 합계 ≤ `FULLTEXT_MAX_TOKENS`(기본 30000)인 파일만 원본 전문을 row_card.file_fulltext로 보낸다(사유는 file_fulltext_note). 추정 토큰 = 글자 수 × 0.7(실측 0.61~0.64보다 넉넉히). profile 모드 row_card는 7.1 필드 그대로. 설계 14장 #2·CHANGELOG는 ②·③ 반영 후 같은 30행으로 profile vs fulltext를 비교해 사람 최종 판정 일치가 좋아질 때 고친다 (비교표: 행별 action·grounding·사람 판정·입력 토큰·비용).
+- 기준치를 넘는 큰 CSV: 프로필 + Task 언급 항목 자동 대조(④). profile+tools는 M5에서 "큰 CSV가 프로필 부족으로 틀린 사례"가 확인될 때 재논의 (설계 12장).
+- G1 의미 탐색: 결정 (a) — task_card 유사도(card 신호) + G1b added_pairs로 대신한다. active 행 전부에 task_card가 있으면 semantic_search_completed=true. M3 게이트에서 놓친 중복 쌍 수·사례를 재고 많으면 (b) LLM 의미 탐색 단계를 검토 (설계 13장).
 - 모델은 GPT-6 Luna로 확정 (14장 #1, 2026-10-22). MODEL_G0/G1B/G2 = `gpt-6-luna` (2026-10-23 확정: 공식 문서에 날짜 고정 스냅샷이 없어 별칭 사용. 실제 응답 모델은 raw 응답에 남음). 단가 = OpenAI 공식 Standard 0.10 / 0.01 / 0.50 USD per 1M (입력 272K 이하, 2026-10-23 확인). 코드 기본값은 null로 두고 Task 폴더 task_config.yaml 또는 --config로 넣는다(run 시 누락이면 오류). 캐시 쓰기 요금($0.125/1M)은 usage에 없어 비용에 반영하지 않는다.
 
 ### M1 결정 (2026-10-21)

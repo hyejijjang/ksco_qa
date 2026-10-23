@@ -16,6 +16,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 from ksco_qa.config import Config
 
 SIGNALS = ("exact", "param", "same_deliverable", "tfidf_task", "card", "tfidf_orig")
+SEMANTIC_SEARCH_METHOD = "task_card TF-IDF(card) + G1b added_pairs"
 _PLACE_NAMES = (
     "서울특별시", "부산광역시", "대구광역시", "인천광역시", "광주광역시", "대전광역시",
     "울산광역시", "세종특별자치시", "경기도", "강원특별자치도", "강원도", "충청북도",
@@ -197,6 +198,8 @@ def generate_candidates(
         if isinstance((g0_by_row[row].get("output") or {}).get("task_card"), dict)
     }
 
+    cards_missing = [row for row in active if row not in task_cards]
+
     fixed_signals = {
         "exact": signal_exact(tasks),
         "param": signal_param(tasks),
@@ -249,7 +252,11 @@ def generate_candidates(
         "search_scope": "전체 행 중 effective_task가 있는 행",
         "retrieval_methods": list(SIGNALS),
         "code_search_completed": True,
-        "semantic_search_completed": False,
+        # 00 5.1 LLM 의미 탐색 = task_card 유사도(card 신호) + G1b added_pairs (2026-10-23 결정 (a)).
+        # card 신호는 task_card가 있는 행만 비교하므로 active 행 전부에 task_card가 있어야 완료.
+        "semantic_search_completed": not cards_missing,
+        "semantic_search_method": SEMANTIC_SEARCH_METHOD,
+        "semantic_search_missing_rows": cards_missing,
         "candidate_count": len(candidate_rows),
         "mean_candidates_per_active_row": (2 * len(candidate_rows) / len(active)) if active else 0.0,
         "candidate_cap": cap,

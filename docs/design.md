@@ -218,6 +218,7 @@ P0·G1a·G1c·G3는 코드만, G0·G1b·G2는 모델 호출로 처리한다. 각
 | card | task_card 토큰 TF-IDF 또는 임베딩, 행별 상위 5개 중 ≥ 0.40 | 임계값 조정 |
 | tfidf_orig | original_task 기준 tfidf_task와 동일 (보조) | 임계값 조정 |
 
+- **의미 탐색 (2026-10-23 결정 (a))**: 00 5.1의 "LLM 의미 탐색"은 card 신호와 G1b의 added_pairs로 대신한다. active 행 전부에 task_card가 있으면 `semantic_search_completed=true`, 빠진 행이 있으면 false로 두고 그 행 목록을 search.jsonl에 남긴다.
 - **규모 관리**: 목표는 행당 평균 3~8개다. 전체 쌍이 active 행 수 × 10을 넘으면 조정 가능 신호의 임계값을 0.05씩 올린다. 최종 임계값과 신호별 쌍 수를 기록한다.
 - **묶음 만들기**: 후보 그래프의 연결 요소를 기준으로 묶음당 최대 40쌍, 행 20개로 자른다. 큰 연결 요소는 쌍을 유지한 채 나눠 같은 쌍이 두 묶음에 들어가지 않게 한다.
   - Work는 배치당 120쌍이었다. API는 호출을 더 잘게 나눠 한 호출 안의 판단 수를 줄인다.
@@ -545,7 +546,8 @@ Task 폴더의 task_config(없으면 기본값)와 전역 설정 파일을 합�
 | EFFORT_G0, EFFORT_G1B, EFFORT_G2 | medium, high, medium | 추론 강도 |
 | G0_ESCALATE | on | 검증 실패·비KEEP 행을 high로 재판정 |
 | G2_OVERLAP_MODE | AGREE_CHECK | AGREE_CHECK / FULL_RECHECK |
-| FILE_ACCESS | profile | profile / profile+tools |
+| FILE_ACCESS | profile | profile / profile+tools / fulltext (fulltext는 2026-10-23 추가된 비교 실험용. 14장 #2 결정 전) |
+| FULLTEXT_MAX_TOKENS | 30000 | fulltext일 때 행의 추정 토큰 합계가 이 값 이하인 파일만 원본 전문을 붙임 (추정 = 글자 수 × 0.7) |
 | CONCURRENCY | 10 | 동시 호출 수 |
 | G1_TARGET_CANDS, G1_PAIRS_PER_CALL | 3~8, 40 | 후보 규모, 묶음 크기 |
 | NOT_FOUND_STOP_RATIO | 0.30 | P0 중단 기준 |
@@ -624,11 +626,12 @@ cost = T_in(uncached) · P_in + T_in(cached) · P_cache + (T_out + T_reasoning) 
 | 리스크 | 영향 | 가능성 | 대응 |
 |---|---|---|---|
 | 파일 프로필이 얇아 판정이 피상적이 됨 (점수 범주 불일치 같은 세부를 놓침) | 높음 | 중간 | 부록 B대로 앞·중간·끝 샘플과 범주 값 목록을 넣음. 부족하면 열람 도구(6.6 B) 추가 |
-| G1 후보를 코드로만 만들어 표현이 다른 의미 중복을 놓침 | 중간 | 중간 | task_card 임베딩 신호 추가, 묶음 안 added_pairs. Work의 중복 105행과 비교 |
+| G1 후보를 코드로만 만들어 표현이 다른 의미 중복을 놓침 | 중간 | 중간 | 00 5.1의 LLM 의미 탐색은 task_card 유사도(card 신호) + 묶음 안 added_pairs로 대신한다 (2026-10-23 결정 (a)). M3에서 놓친 중복 쌍을 재고, 많으면 별도 LLM 의미 탐색 단계(b)를 검토 |
 | 폴더·Task 이름 등 바깥 맥락에 끌려 직무 기준 오판 (배치 04 유형) | 높음 | 낮음 | 호출에 Task 이름을 넣지 않음, job_evaluated 대조, 직업별 분포 이상 검사 |
 | 모델 버전 교체로 판정 경향이 바뀜 | 중간 | 중간 | 모델 ID를 날짜 고정형으로 지정, 변경 시 고정 평가셋 재실행 |
 | 구조화 출력을 지키지만 내용이 빈약함 (짧은 형식적 사유) | 중간 | 중간 | 사유에 관찰 위치·직업명 포함 요구, 템플릿 감지, 사람 샘플 검토 |
 | 대용량 CSV(수십 MB)·HWP 등 프로필 단계 실패 | 낮음 | 높음 | 스트리밍 읽기, 형식별 파서, 실패 시 NOT_INSPECTED로 기록하고 진행 |
+| FULLTEXT_MAX_TOKENS를 넘는 큰 CSV는 원본 전문을 못 보고 프로필로만 판정됨 (2026-10-23) | 중간 | 중간 | 프로필 + Task 언급 항목 자동 대조로 간다. profile+tools(6.6 B)는 M5에서 "큰 CSV가 프로필 부족으로 틀린 사례"가 확인될 때 다시 논의 |
 | 속도 제한·장애로 실행이 길어짐 | 낮음 | 중간 | 백오프 재시도, 재개, 동시 호출 수 자동 조절 |
 | 비용 초과 | 낮음 | 낮음 | estimate 모드로 사전 산정, BUDGET_USD 상한에서 멈춤 |
 | DataList에 붙여 넣을 결과 형식이 기존 열과 다름 (R=AI 판정, T=Regenerate Task 등) | 중간 | 중간 | 04_sheet_paste.xlsx를 KSCO-28 DataList R·T열 값 형식에 맞추고 M1 게이트에서 확인 (2026-10-22 정정: 검수 툴이 JSONL을 읽는 연동은 없음) |
@@ -648,7 +651,7 @@ cost = T_in(uncached) · P_in + T_in(cached) · P_cache + (T_out + T_reasoning) 
 | M0 준비 | 모델·단가·파일 열람 방식 등 14장 결정 사항 확정, 고정 평가셋 후보 60행 선정, 실행 환경 준비 | 결정 사항 전부 확정 |
 | M1 결정적 코드 | P0 매핑·파일 프로필·row_card, G3 판정·내보내기·검증. Work 결과는 DataList R~V열 판정뿐이라 입력으로 쓸 수 없어, 가상 단계 기록(G0·G1·G2)으로 mock run을 끝까지 돌린다 | mock run 산출물 + 06 최소 검증 10항목 통과 + 04_sheet_paste.xlsx가 DataList 기존 열(AI 판정, Regenerate Task 등)과 같은 형식 (2026-10-22 재정의) |
 | M2 호출 기반 + G0 | 클라이언트 래퍼·재시도·호출 기록·재개, G0 프롬프트. sample 30으로 G0 실행, 사람이 판정 검토 | 직무 기준 오판·템플릿 판정 0건 |
-| M3 G1 중복 검수 | 후보 생성·묶음·쌍 판정·그룹 확정. Work의 중복 제외 105행과 비교 | 행당 후보 3~8개, 차이 나는 쌍 전부 설명 |
+| M3 G1 중복 검수 | 후보 생성·묶음·쌍 판정·그룹 확정. Work의 중복 제외 105행과 비교 | 행당 후보 3~8개, 차이 나는 쌍 전부 설명. 사람(또는 Work) 중복 판정 대비 놓친 중복 쌍 수와 사례를 측정하고, 놓친 중복이 많으면 LLM 의미 탐색 단계 신설(결정 (b))을 검토 (2026-10-23) |
 | M4 G2 + 전체 연결 | G2 프롬프트, P0~G3를 한 번의 run으로 연결. accounting 398행 1회 완주, 비용·시간 실측 | 명령 한 번으로 완주, 검증 통과 |
 | M5 Work 비교 검증 | 일치도 측정, 불일치 4분류, 프롬프트·프로필 개선. 고정 평가셋 60행 판정 확정 | 제안 목표치 충족 또는 차이 사유 문서화 |
 | M6 운영화 | finpro 등 두 번째 Task 적용, Batch 모드. 운영 가이드, 프롬프트 변경 절차 정착 | 두 번째 Task 완주 |

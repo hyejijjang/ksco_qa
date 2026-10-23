@@ -134,3 +134,19 @@ def test_write_search_artifacts_is_append_only_and_idempotent(tmp_path: Path) ->
     summary_lines = (directory / "search.jsonl").read_text(encoding="utf-8").splitlines()
     assert len(candidate_lines) == len(bundle_lines) == len(summary_lines) == 1
     assert json.loads(bundle_lines[0])["pairs"] == [[2, 4]]
+
+
+def test_semantic_search_completed_when_every_active_row_has_task_card() -> None:
+    """결정 (a) 2026-10-23: 의미 탐색 = task_card 유사도 + G1b added_pairs. task_card가 빠진 행이 있으면 미완료."""
+    cards = [{"source_row": r, "original_task": f"원본 {r}", "expected_filename": f"{r}.csv",
+              "deliverable_title": f"자료 {r}"} for r in (2, 3, 4)]
+    card = {"input": "자료", "operations": ["집계"], "criteria": ["기준"], "output": "표"}
+    records = [{"source_row": r, "action": "KEEP", "output": {"task_card": card}} for r in (2, 3, 4)]
+
+    done = generate_candidates(cards, records, Config())
+    assert done["semantic_search_completed"] is True and done["semantic_search_missing_rows"] == []
+    assert done["semantic_search_method"] == "task_card TF-IDF(card) + G1b added_pairs"
+
+    records[1] = {"source_row": 3, "action": "KEEP", "output": {"task_card": None}}
+    missing = generate_candidates(cards, records, Config())
+    assert missing["semantic_search_completed"] is False and missing["semantic_search_missing_rows"] == [3]

@@ -107,7 +107,8 @@ call_stage: [G0, G1B, G2]
 g2_overlap_mode: [AGREE_CHECK, FULL_RECHECK]
 
 # 설정 FILE_ACCESS (설계 6.6, 10.2)
-file_access: [profile, "profile+tools"]
+# fulltext (2026-10-23): FULLTEXT_MAX_TOKENS 이하 파일은 원본 전문을 row_card.file_fulltext로 보냄
+file_access: [profile, "profile+tools", fulltext]
 
 # 실행 모드 --mode (설계 6.5)
 call_mode: [online, batch]

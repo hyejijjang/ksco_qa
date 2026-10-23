@@ -54,6 +54,8 @@ class Config(BaseModel):
     G0_ESCALATE: bool = True
     G2_OVERLAP_MODE: str = "AGREE_CHECK"
     FILE_ACCESS: str = "profile"
+    # FILE_ACCESS=fulltext: 행의 추정 토큰 합계가 이 값 이하인 파일만 원본 전문을 붙인다 (2026-10-23)
+    FULLTEXT_MAX_TOKENS: int = Field(default=30000, ge=1000)
     CONCURRENCY: int = Field(default=10, ge=1)
     G1_TARGET_CANDS: tuple[int, int] = (3, 8)
     G1_PAIRS_PER_CALL: int = Field(default=40, ge=1, le=40)  # CLAUDE.md 원칙 3: ≤40쌍

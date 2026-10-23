@@ -17,6 +17,7 @@ from typing import Any
 
 from ksco_qa.config import Config
 from ksco_qa.profiler import FileProfile, combine_for_row, profile_file, row_budget
+from ksco_qa.profiler import fulltext
 from ksco_qa.profiler.zip_file import ZIP_LOCATOR_SEP, member_display_name, profile_member
 
 P0_VERSION = "2"
@@ -39,6 +40,8 @@ ROW_CARD_FIELDS = (
     "match_status", "inspected", "reference_mode", "reference_note", "original_task", "original_task_empty",
     "jobinfo", "file_profile",
 )
+# FILE_ACCESS=fulltext일 때만 뒤에 붙는 필드 (2026-10-23). profile 모드의 row_card는 위 필드 그대로다.
+FULLTEXT_FIELDS = ("file_fulltext", "file_fulltext_note")
 MAPPING_AUDIT_COLUMNS = (
     "source_row", "id", "name_D", "format_F", "expected_filename", "match_status", "matched_locator",
     "inspected", "inspected_locations", "reason", "reference_mode", "warnings",
@@ -428,6 +431,16 @@ def profile_matched(match: MatchResult, cache_dir: Path, total_budget: int) -> l
     return profiles
 
 
+def fulltext_matched(match: MatchResult, cache_dir: Path, max_tokens: int) -> list[fulltext.FullText]:
+    items = []
+    for e in match.matched:
+        if e.in_zip:
+            items.append(fulltext.fulltext_member(e.path, e.member, e.locator, cache_dir, max_tokens))
+        else:
+            items.append(fulltext.fulltext_file(e.path, e.locator, cache_dir, max_tokens))
+    return items
+
+
 # --- 11. row_card ---
 
 
@@ -436,7 +449,7 @@ def _text(value: Any) -> str | None:
 
 
 def build_row_card(row: DataRow, match: MatchResult, inspected: bool, reference: tuple[str, str | None],
-                   file_profile: str | None) -> dict[str, Any]:
+                   file_profile: str | None, full: tuple[str | None, str] | None = None) -> dict[str, Any]:
     """5.1-11, 7.1: row_card. 설계 7.1 필드만 담는다 (O·L·M열, 이전 검수 결과 열 금지)."""
     v = row.values
     original = None if is_blank(v.get("G")) else str(v["G"])
@@ -458,6 +471,8 @@ def build_row_card(row: DataRow, match: MatchResult, inspected: bool, reference:
         "file_profile": file_profile,
     }
     assert tuple(card) == ROW_CARD_FIELDS
+    if full is not None:
+        card["file_fulltext"], card["file_fulltext_note"] = full
     return card
 
 
@@ -515,6 +530,14 @@ def run_p0(task_folder: Path, cfg: Config, run_dir: Path, mapping_audit_path: Pa
         inspected = match.match_status == "MATCHED" and bool(profiles) and all(p.inspected for p in profiles)
         reference = classify_reference(row.values.get("E"))
         file_profile = combine_for_row(profiles) if profiles else None
+        full_items: list[fulltext.FullText] = []
+        full = None
+        if cfg.FILE_ACCESS == "fulltext":
+            if match.match_status == "MATCHED":
+                full_items = fulltext_matched(match, cache_dir, cfg.FULLTEXT_MAX_TOKENS)
+                full = fulltext.combine_for_row(full_items, cfg.FULLTEXT_MAX_TOKENS)
+            else:
+                full = (None, f"매핑 {match.match_status}: 원본 없음")
         warnings = list(match.warnings) + jobinfo_warnings(row.values.get("I"))
         warnings += list(dict.fromkeys(p.warning for p in profiles if p.warning))
         if is_blank(row.values.get("G")):
@@ -525,7 +548,7 @@ def run_p0(task_folder: Path, cfg: Config, run_dir: Path, mapping_audit_path: Pa
             reason += " / NOT_INSPECTED: " + "; ".join(f"{p.locator}: {p.error}" for p in failed)
         locations = [f"{p.locator}: {loc}" for p in profiles for loc in p.inspected_locations]
 
-        card = build_row_card(row, match, inspected, reference, file_profile)
+        card = build_row_card(row, match, inspected, reference, file_profile, full)
         row_cards.append(card)
         records.append({
             "source_row": row.source_row,
@@ -538,6 +561,8 @@ def run_p0(task_folder: Path, cfg: Config, run_dir: Path, mapping_audit_path: Pa
             "inspected": inspected,
             "inspected_locations": locations,
             "profiles": [p.to_dict() for p in profiles],
+            **({"fulltext": [{k: v for k, v in item.to_dict().items() if k != "text"} for item in full_items],
+                "file_fulltext_note": full[1]} if full is not None else {}),
             "reference_mode": reference[0],
             "reference_note": reference[1],
             "reason": reason,
