@@ -6,6 +6,7 @@
 - 행 라벨: 연번 열(머리글 연번·순번·번호·No·NO 또는 값의 80% 이상이 1부터 증가하는 정수)·날짜 열은 열 단위로 건너뛴다.
   행마다 남은 칸 중 처음 나오는 이름 칸을 쓴다 — 빈칸·번호만 있는 칸(Ⅰ. (1) 1. 가. ①)·금액 칸은 건너뛰고,
   "Ⅰ. 유동자산"처럼 번호가 붙어 있으면 번호를 뗀다. 소계·합계 줄은 빼고 "합계 행 있음"으로 표시.
+  띄어 쓴 "~ 계" 소계 행(지역본부 계)은 빼지 않고 "지역본부 계(소계)"로 남긴다 (2026-10-26, 빼면 grounding 오판).
 
 문서형:
 - 레이아웃 칸("1열" 또는 "1행" — 단 1행 표는 칸 절반 이상이 숫자면 데이터 표, 2열 이상 여러 행 표는 데이터 표)은
@@ -41,7 +42,7 @@ NUMBERING_PREFIX_RE = re.compile(rf"^\s*{_NUMBERING}\s*")
 BARE_NUMBERING_RE = re.compile(rf"^\s*{_NUMBERING}\s*$")
 NUMERIC_CELL_RE = re.compile(r"^\s*\(?\s*[-−△▲]?\s*[\d,]+(\.\d+)?\s*\)?\s*%?\s*$|^\s*[-−]\s*$")
 TOTAL_ROW_RE = re.compile(r"(합\s*계|소\s*계|총\s*계)$|^계$|^total$|^subtotal$", re.I)
-SUBTOTAL_SUFFIX_RE = re.compile(r"\S\s+계$")  # "지역본부 계"처럼 띄어 쓴 "~ 계" (붙여 쓴 "회계"는 아님)
+SUBTOTAL_SUFFIX_RE = re.compile(r"\S\s+계$")  # "지역본부 계"처럼 띄어 쓴 "~ 계" (붙여 쓴 "회계"는 아님) → "(소계)" 표시
 
 
 @dataclass
@@ -285,8 +286,10 @@ def _row_labels(t: DocTable) -> RowLabels:
                 continue
             if level is None and NUMBERING_PREFIX_RE.match(text):
                 level = numbering_level(text)  # 번호가 붙은 이름 (예: "Ⅰ. 유동자산")
-            if TOTAL_ROW_RE.search(re.sub(r"\s+", "", name)) or SUBTOTAL_SUFFIX_RE.search(name):
+            if TOTAL_ROW_RE.search(re.sub(r"\s+", "", name)):
                 has_total = True
+            elif SUBTOTAL_SUFFIX_RE.search(name):
+                found.append((f"{name}(소계)", level, j))
             else:
                 found.append((name, level, j))
             break

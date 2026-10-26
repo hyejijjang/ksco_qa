@@ -15,6 +15,29 @@ prompt_version은 단계 프롬프트 + common + 스키마 + 기준 발췌를 �
 - 평가셋 결과: (이전 → 이후)
 ```
 
+## 2026-10-26 g0-v2 ②·③ (common / G0, file_profile)
+- 변경 ② 프롬프트 공백 채우기 (00 원문 발췌):
+  common.md를 00_Work_Run.md 원문으로 채움 — 0장 역할 문단, 1장 최종 Agent 제약·절대 금지, 2장 원칙 1~8, 3.2 Reference 분기.
+  이전에는 TODO 주석뿐이라 빈 제목 4개("역할·절대 규칙·출력 다이어트·직무 기준 경고")만 전송됐음.
+  "출력 다이어트"·"직무 기준 경고"는 00 발췌가 아니어서 이번에 넣지 않음(제목도 뺌).
+  g0.md: "[확인: 각 값의 정의는 00_Work_Run.md 기준]" 삭제, P/R/F/NA 정의로 00 6.4 원문 문장
+  ("각 지표는 `PASS|REVIEW|FAIL|N_A`로 판정하고 … 단순 D1/작업 단계가 적다는 이유만으로 FAIL 금지.")을 판정 기준에 추가.
+- 변경 ③ 해석 규칙 — **00에 없는 팀 해석** (g0.md "해석 규칙" 섹션, 00 발췌와 분리):
+  1. input_contract: Task에 입력 자료가 안 적혀 있는 것 자체는 결함이 아님. Reference 최소 종류·필드를 설명할 수 있으면 P(내용은 expected_reference_spec), 설명조차 못 할 때만 R.
+  2. grounding: 파일 내용과 모순될 때만 R/F. 프로필 범위 밖이라 확인 못 한 항목은 P + reason "프로필 범위 밖 미확인: <항목>". 핵심 결과 항목을 확인 못 하면 REVIEW_B 검토. 목적 문구("공개하기 위해" 등)는 대상 아님.
+  3. KEEP은 F만 막음. REGENERATE는 문장 수정으로 R/F가 실제 해소될 때만. 문장으로 안 풀리는 R이면 KEEP + issues.
+  4. output_specification: 파일명·확장자·인코딩은 D·F열로 정해진 값이라 Task에 없다는 이유로 R을 주지 않음. 결과 구성(표·섹션·열·항목)이 확인 가능하게 정해졌는가만 판단.
+- 변경 REGENERATE 작성 금지 조건 (g0.md 출력 규칙 + 코드 검증): 핵심 처리·판단 제거·단순 복사화 금지, 파일명·인코딩·구분자 등 B 파일 고유 정보 금지
+  (코드: expected_filename·인코딩 문자열 있으면 검증 실패 → 피드백 재호출), 원본·직무정보·file_profile에 없는 입력 자료 창작 금지.
+- 변경 (입력) file_profile: 띄어 쓴 "~ 계" 소계 행을 빼던 규칙을 되돌려 "지역본부 계(소계)"로 남김. PROFILER_VERSION 4.
+- 변경 (호출) G0_ESCALATE 대상을 코드 검증 실패·RESELECT_B·REVIEW_B로 좁힘 (REGENERATE 제외).
+- 이유: 30행 PoC(2026-10-23, run 20261023-180904, 회계 사무원 30행)에서 G0 REGENERATE 26 / REVIEW_B 3 / KEEP 1인데
+  Work는 Regenerate Task 0건·사람 최종 PASS 8건(8건 모두 PoC는 REGENERATE). R이 많은 차원: input_contract 27, output_specification 27,
+  grounding 22(+F 5) — 입력 자료 미기재·파일명/인코딩 미기재·목적 문구를 결함으로 봄. 법인카드 행(task_0000015)은
+  프로필에서 "지역본부 계"가 빠져 grounding 오판. 재판정 29/30행 중 판정이 바뀐 행 1개(G0 비용 약 2배).
+- 평가셋 결과: (이전 → 이후) 같은 30행 재실행 후 `ksco-qa compare-runs`로 기록 예정.
+  이전(g0 b213abad3724d91b): REGENERATE 26 · REVIEW_B 3 · KEEP 1, 사람 최종 PASS 8행 중 REGENERATE 8, 최종 REVIEW 30, 비용 $0.146.
+
 ## 2026-10-21 g2.md UNRESOLVED 기본값, file_profile 행 라벨 문구·축약 단계 (G2 / G0·G2 입력)
 - 변경: g2.md 판정 규칙의 "[확인: 이 경우의 reference_action·readiness 기본값]"을 결정으로 교체
   ("reference_mode가 UNRESOLVED_REFERENCE이면 reference_action은 CHECK_ACCESS, reference_readiness는 HOLD다").

@@ -64,10 +64,31 @@ def test_validate_output_checks_job_keep_regenerate_and_duplicate_issues(sample_
     assert any("ORIGINAL_TASK_EMPTY" in error for error in validate_output(empty_card, empty_keep))
 
 
+def test_regenerate_rejects_b_file_specific_info() -> None:
+    """REGENERATE 금지 조건 (2026-10-26): 산출물 파일명·인코딩을 새 Task에 넣으면 검증 실패."""
+    card = {"source_row": 2, "id": "T-001", "job_leaf": "회계 사무원", "original_task": "원본 Task",
+            "deliverable_title": "업무추진비 내역", "format": "CSV, PDF", "expected_filename": "업무추진비 내역.csv, 업무추진비 내역.pdf"}
+    output = {"job_evaluated": "회계 사무원", "action": "REGENERATE", "checks": {}, "issues": {}}
+
+    output["regenerated_task_new"] = "제공된 자료로 사용일자순 내역표를 작성해 업무추진비 내역.CSV로 저장한다."
+    errors = validate_output(card, output)
+    assert errors == ["regenerated_task_new에 산출물 파일명 '업무추진비 내역.CSV'이 들어 있다 "
+                      "(파일명은 D·F열로 정해지므로 새 Task에 넣지 않는다)"]
+
+    output["regenerated_task_new"] = "제공된 자료로 내역표를 작성하고 CP949 인코딩 CSV로 저장한다."
+    errors = validate_output(card, output)
+    assert errors == ["regenerated_task_new에 인코딩 'CP949, 인코딩'이 들어 있다 (B 파일 고유 정보는 새 Task에 넣지 않는다)"]
+
+    output["regenerated_task_new"] = "제공된 자료로 사용일자순 업무추진비 내역표를 작성해 CSV 파일로 제출한다."
+    assert validate_output(card, output) == []  # 제목·형식 이름만 쓰는 것은 허용
+
+
 def test_escalation_conditions() -> None:
     assert needs_escalation({"action": "KEEP"}, ["job mismatch"])
     assert needs_escalation({"action": "REVIEW_B"}, [])
+    assert needs_escalation({"action": "RESELECT_B"}, [])
     assert not needs_escalation({"action": "KEEP"}, [])
+    assert not needs_escalation({"action": "REGENERATE"}, [])  # 2026-10-26: REGENERATE는 재판정하지 않는다
 
 
 def test_stage_end_checks_detect_repeated_reason_and_job_concentration() -> None:

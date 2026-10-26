@@ -74,3 +74,30 @@ def test_real_prompt_files_load() -> None:
     for mode in ("AGREE_CHECK", "FULL_RECHECK"):
         assert "<!--" not in load_prompt("G2", mode)
     assert "<!--" not in load_prompt("G0") and "<!--" not in load_prompt("G1B")
+
+
+def _excerpt_lines(text: str) -> list[str]:
+    """제목(#) 줄과 빈 줄을 뺀 본문 줄."""
+    return [line for line in text.splitlines() if line.strip() and not line.startswith("#")]
+
+
+def test_criteria_excerpts_are_verbatim() -> None:
+    """common.md 전체와 g0.md '판정 기준' 섹션은 00_Work_Run.md 원문 줄을 그대로 잘라 쓴다 (요약·재작성 금지)."""
+    root = Path(__file__).resolve().parents[1]
+    source = set((root / "criteria" / "00_Work_Run.md").read_text(encoding="utf-8").splitlines())
+    common = client.strip_comments((root / "prompts" / "common.md").read_text(encoding="utf-8"))
+    g0 = client.strip_comments((root / "prompts" / "g0.md").read_text(encoding="utf-8"))
+    g0_criteria = g0.split("## 판정 기준", 1)[1].split("## 행 단위 지시", 1)[0]
+    for name, text in (("common.md", common), ("g0.md 판정 기준", g0_criteria)):
+        lines = _excerpt_lines(text)
+        assert lines, name
+        assert [line for line in lines if line not in source] == [], name
+
+
+def test_g0_prompt_has_no_work_markers_and_keeps_rules_separate() -> None:
+    """[확인]·TODO 작업용 표시가 전송 텍스트에 없고, 팀 해석 규칙은 00 발췌(판정 기준)와 분리돼 있다."""
+    text = load_prompt("G0")
+    assert "[확인" not in text and "TODO" not in text
+    criteria, rows = text.split("## 행 단위 지시", 1)
+    assert "### 해석 규칙" in rows and "해석 규칙" not in criteria
+    assert "REGENERATE 작성 금지 조건" in rows

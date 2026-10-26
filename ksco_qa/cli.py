@@ -17,6 +17,7 @@ from typing import Annotated, NoReturn, Optional
 import typer
 
 from ksco_qa.compare import CompareError, WorkResultFormatError, compare_results
+from ksco_qa.compare_runs import compare_runs
 from ksco_qa.config import ConfigError, require_for_model_calls, resolve_config
 from ksco_qa.estimate import estimate_run
 from ksco_qa.llm.client import BudgetExceeded, ForbiddenContext
@@ -262,6 +263,22 @@ def compare(
         _fail(str(error))
     report["api_results_dir"] = str(api_results)
     typer.echo(json.dumps(report, ensure_ascii=False, indent=2))
+
+
+@app.command("compare-runs")
+def compare_runs_cmd(
+    task_folder: TaskFolder,
+    old: Annotated[str, typer.Option("--old", help="이전 run_id (03_results/_work 아래 폴더 이름)")],
+    new: Annotated[str, typer.Option("--new", help="새 run_id")],
+    with_: Annotated[Path, typer.Option("--with", help="Work 결과 CSV/TSV 또는 DataList.xlsx (사람 판정·검수 메모)")],
+    out: Annotated[Optional[Path], typer.Option("--out", help="출력 xlsx (기본: 새 run 폴더/compare_vs_<이전 run_id>.xlsx)")] = None,
+) -> None:
+    """같은 표본의 두 run을 행별로 비교한다: G0 action·차원별 R/F·재생성 Task, G1·G2·최종, 사람 판정."""
+    try:
+        path = compare_runs(task_folder, old, new, with_, out)
+    except (CompareError, WorkResultFormatError, OSError, ValueError) as error:
+        _fail(str(error))
+    typer.echo(f"비교표: {path}")
 
 
 if __name__ == "__main__":

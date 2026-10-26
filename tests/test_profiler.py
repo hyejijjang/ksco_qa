@@ -266,6 +266,16 @@ def test_row_labels_skip_serial_and_date_up_to_third_column() -> None:
     assert row_labels(DocTable(rows, 0)).describe() == "첫 열"
 
 
+def test_row_labels_keep_spaced_subtotal_marked() -> None:
+    """회귀 (2026-10-26): "지역본부 계"를 빼면 G0가 프로필에 없는 항목으로 보고 grounding 오판 → "(소계)"로 남긴다."""
+    from ksco_qa.profiler.doc_model import DocTable, row_labels
+    rows = [["구 분", "수 량"], ["총 계", "1,266"], ["본 사", "375"], ["지역본부 계", "891"],
+            ["서울지역본부", "120"], ["회계팀", "5"], ["소 계", "10"]]
+    labels = row_labels(DocTable(rows, 0))
+    assert labels.values == ["본 사", "지역본부 계(소계)", "서울지역본부", "회계팀"]  # 붙여 쓴 "회계"는 소계 아님
+    assert labels.has_total  # 총 계·소 계는 그대로 합계 행
+
+
 def test_xlsx_row_labels(tmp_path: Path) -> None:
     import openpyxl
 
@@ -419,7 +429,7 @@ def test_hwpx_card_profile(tmp_path: Path) -> None:
     assert p.inspected_locations == ["문단 1-11 (각 80자)", "표1-4 머리글·행 라벨·앞 2행"]
     assert "문단 2: '26.03.31.현재" in t and "문단 4: (단위 : 매)" in t
     assert "표1 (문단 4 다음) 5행 × 2열\n  머리글: 구    분 | 수 량" in t  # 머리글 공백 원문 그대로
-    assert "첫 열(2): 본 사, 서울지역본부 · 합계 행 있음" in t  # 총 계·지역본부 계는 합계 행
+    assert "첫 열(3): 본 사, 지역본부 계(소계), 서울지역본부 · 합계 행 있음" in t  # 총 계만 합계 행, 소계는 표시해 남김
     assert "표2 (문단 6 다음) 6행 × 2열 · 병합 셀 있음 · 앞 문단: ㅇ카드사용 의무적 제한 업종" in t
     assert "표3 (문단 8 다음) 3행 × 2열 · 앞 문단: ㅇ카드사용 금지 업종\n  머리글: 구   분 | 내      용" in t
     assert "표4 (문단 10 다음) 2행 × 2열 · 앞 문단: ㅇ카드사용 제한 업종" in t

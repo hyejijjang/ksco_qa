@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
+import unicodedata
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
@@ -14,7 +16,10 @@ from ksco_qa.config import Config
 from ksco_qa.dictionaries import g0_check_keys
 from ksco_qa.llm.types import CallResult
 
-REVIEW_ACTIONS = ("REGENERATE", "RESELECT_B", "REVIEW_B")
+# 재판정 대상 (2026-10-26): 검증 실패와 RESELECT_B·REVIEW_B만. REGENERATE는 재판정하지 않는다.
+ESCALATE_ACTIONS = ("RESELECT_B", "REVIEW_B")
+# REGENERATE 금지 조건 (2026-10-26): 산출물 인코딩은 B 파일 고유 정보라 새 Task에 넣지 않는다.
+ENCODING_RE = re.compile(r"cp\s*949|ms\s*949|euc[-_ ]?kr|utf[-_ ]?(?:8|16)(?:[-_ ]?sig)?|인코딩", re.I)
 FAILURE_ACTIONS = {"VALIDATION_FAIL": "VALIDATION_FAILED", "FAILED": "CALL_FAILED"}
 
 
@@ -62,6 +67,8 @@ def validate_output(row_card: dict[str, Any], output: dict[str, Any]) -> list[st
             errors.append("action이 REGENERATE인데 regenerated_task_new가 비어 있다")
         elif regenerated == original:
             errors.append("action이 REGENERATE인데 regenerated_task_new가 original_task와 같다")
+        else:
+            errors += _b_file_specific_errors(row_card, regenerated)
 
     issues = output.get("issues") or {}
     issue_rows: dict[str, list[str]] = defaultdict(list)
@@ -76,9 +83,34 @@ def validate_output(row_card: dict[str, Any], output: dict[str, Any]) -> list[st
     return errors
 
 
+def _expected_filenames(row_card: dict[str, Any]) -> list[str]:
+    """D·F열로 정해진 산출물 파일명. 여러 형식이면 형식별로 {D}.{형식}."""
+    title = (row_card.get("deliverable_title") or "").strip()
+    formats = [f.strip().lstrip(".") for f in str(row_card.get("format") or "").split(",") if f.strip()]
+    names = [f"{title}.{fmt}" for fmt in formats] if title else []
+    names += [n.strip() for n in str(row_card.get("expected_filename") or "").split(", ") if n.strip()]
+    unique: dict[str, str] = {}
+    for name in names:
+        unique.setdefault(unicodedata.normalize("NFC", name).casefold(), name)
+    return list(unique.values())
+
+
+def _b_file_specific_errors(row_card: dict[str, Any], regenerated: str) -> list[str]:
+    """새 Task에 산출물 파일명·인코딩 같은 B 파일 고유 정보가 들어갔는지 (REGENERATE 금지 조건)."""
+    errors = []
+    text = unicodedata.normalize("NFC", regenerated).casefold()
+    for name in _expected_filenames(row_card):
+        if unicodedata.normalize("NFC", name).casefold() in text:
+            errors.append(f"regenerated_task_new에 산출물 파일명 '{name}'이 들어 있다 (파일명은 D·F열로 정해지므로 새 Task에 넣지 않는다)")
+    encodings = list(dict.fromkeys(m.group(0) for m in ENCODING_RE.finditer(regenerated)))
+    if encodings:
+        errors.append(f"regenerated_task_new에 인코딩 '{', '.join(encodings)}'이 들어 있다 (B 파일 고유 정보는 새 Task에 넣지 않는다)")
+    return errors
+
+
 def needs_escalation(output: dict[str, Any], validation_errors: list[str]) -> bool:
-    """검증 실패 또는 비KEEP 판정은 G0_ESCALATE 설정에 따라 high로 재판정한다."""
-    return bool(validation_errors) or output.get("action") in REVIEW_ACTIONS
+    """코드 검증 실패와 RESELECT_B·REVIEW_B만 G0_ESCALATE 설정에 따라 high로 재판정한다 (REGENERATE 제외)."""
+    return bool(validation_errors) or output.get("action") in ESCALATE_ACTIONS
 
 
 def stage_end_checks(records: list[dict[str, Any]], row_cards: list[dict[str, Any]]) -> list[dict[str, Any]]:

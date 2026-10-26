@@ -13,7 +13,7 @@ from datetime import date, datetime, time
 from typing import Any, Protocol
 
 PROFILE_MAX_CHARS = 1500
-PROFILER_VERSION = "3"
+PROFILER_VERSION = "4"
 CELL_MAX = 40
 ROW_MAX = 200
 CATEGORY_MAX = 20

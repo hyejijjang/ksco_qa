@@ -342,6 +342,31 @@ def test_check_template_sentences(g3_run) -> None:
     assert v.check_template_sentences(_records(g3_run), cards) == []
 
 
+def test_template_check_ignores_evidence_copied_to_every_dimension(g3_run) -> None:
+    """차원별 evidence는 설계상 evidence_loc 복사(전 차원·전 행 같아도 됨) → 템플릿으로 보지 않는다.
+    차원별 conclusion(issues)은 행마다 달라야 하고, 같으면 템플릿으로 잡는다 (2026-10-26 확인)."""
+    recs = _records(g3_run)
+    cards = [{"source_row": r["source_row"], "job": "", "job_leaf": "", "deliverable_title": ""} for r in recs]
+    for i, r in enumerate(recs):
+        r["revision"]["decided_by"] = "MODEL"
+        r["revision"]["reason"] = f"행별로 다른 이유 {chr(0xAC00 + i)}"
+        for k, c in r["revision"]["g0_self_check"].items():
+            c["status"] = "REVIEW"
+            c["evidence"] = "file_profile 표1 머리글"  # 모든 차원·모든 행에 같은 evidence
+            c["conclusion"] = f"{k} 문제 {chr(0xAC00 + i)}"
+        for c in r["verify"]["checks"].values():
+            c["evidence"] = "file_profile 표1 머리글"
+    assert v.check_template_sentences(recs, cards) == []
+
+    checked = [r for r in recs if r["revision"]["g0_self_check"]]
+    assert len(checked) >= 3
+    assert v.check_template_sentences(recs, cards, min_rows=3) == []
+    for r in checked:
+        next(iter(r["revision"]["g0_self_check"].values()))["conclusion"] = "근거 없는 항목이 있다"
+    assert v.check_template_sentences(recs, cards, min_rows=3) == [
+        f"G0 issues 같은 문장이 {len(checked)}행에 반복 (예: {sorted(r['source_row'] for r in checked)[:5]}행)"]
+
+
 def test_check_row_identity_and_counts(g3_run) -> None:
     ctx, _, records = g3_run
     inputs = load_inputs(ctx.run_dir)
