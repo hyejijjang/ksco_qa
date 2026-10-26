@@ -268,14 +268,14 @@ def compare(
 @app.command("compare-runs")
 def compare_runs_cmd(
     task_folder: TaskFolder,
-    old: Annotated[str, typer.Option("--old", help="이전 run_id (03_results/_work 아래 폴더 이름)")],
-    new: Annotated[str, typer.Option("--new", help="새 run_id")],
+    run: Annotated[list[str], typer.Option("--run", help="비교할 run, 반복 지정 ('이름=run_id' 또는 run_id). 첫 run이 기준")],
     with_: Annotated[Path, typer.Option("--with", help="Work 결과 CSV/TSV 또는 DataList.xlsx (사람 판정·검수 메모)")],
-    out: Annotated[Optional[Path], typer.Option("--out", help="출력 xlsx (기본: 새 run 폴더/compare_vs_<이전 run_id>.xlsx)")] = None,
+    mark: Annotated[Optional[list[str]], typer.Option("--mark", help="추적 표시, 반복 지정 (예: 'C 유형=task_0000012,task_0000030')")] = None,
+    out: Annotated[Optional[Path], typer.Option("--out", help="출력 xlsx (기본: 마지막 run 폴더/compare_<N>runs.xlsx)")] = None,
 ) -> None:
-    """같은 표본의 두 run을 행별로 비교한다: G0 action·차원별 R/F·재생성 Task, G1·G2·최종, 사람 판정."""
+    """같은 표본의 여러 run을 행별로 비교한다: G0·G1·G2·최종, G2 R 유형, 파일 입력, 토큰·비용, 사람 판정."""
     try:
-        path = compare_runs(task_folder, old, new, with_, out)
+        path = compare_runs(task_folder, run, with_, out, mark)
     except (CompareError, WorkResultFormatError, OSError, ValueError) as error:
         _fail(str(error))
     typer.echo(f"비교표: {path}")

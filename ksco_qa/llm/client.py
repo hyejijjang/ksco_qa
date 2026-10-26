@@ -38,6 +38,8 @@ FEEDBACK_HEADER = "직전 응답이 아래 검증 규칙을 위반했다. 입력
 
 _COMMENT_RE = re.compile(r"<!--.*?-->", re.S)
 _BLANK_LINES_RE = re.compile(r"\n{3,}")
+_STAGES_RE = re.compile(r"<!--\s*stages:\s*([A-Z0-9 ]+?)\s*-->")
+RULES_INCLUDE = "<!-- include rules.md -->"
 
 # 호출에 절대 경로를 넣지 않는다 (CLAUDE.md 원칙 5)
 _DRIVE_PATH_RE = re.compile(r"(?<![A-Za-z])[A-Za-z]:[\\/]")
@@ -77,10 +79,32 @@ def select_overlap_section(text: str, mode: str) -> str:
     return "".join(kept)
 
 
+def select_rules(text: str, stage: str) -> str:
+    """rules.md에서 이 단계에 보낼 줄만 남긴다. "<!-- stages: G0 G2 -->"는 다음 표시까지의 줄에 적용된다 (2026-10-26)."""
+    text = _COMMENT_RE.sub(lambda m: m.group(0) if _STAGES_RE.fullmatch(m.group(0)) else "", text)
+    kept, stages = [], None
+    for line in text.splitlines():
+        marker = _STAGES_RE.fullmatch(line.strip())
+        if marker:
+            stages = marker.group(1).split()
+            continue
+        if stages is None or stage in stages:
+            kept.append(line)
+    return "\n".join(kept).strip() + "\n"
+
+
+def include_rules(text: str, stage: str) -> str:
+    """단계 프롬프트의 "<!-- include rules.md -->" 자리에 공통 해석 규칙을 넣는다 (g0·g2가 같은 규칙 파일을 쓴다)."""
+    if RULES_INCLUDE not in text:
+        return text
+    rules = select_rules((PROMPT_DIR / "rules.md").read_text(encoding="utf-8"), stage)
+    return text.replace(RULES_INCLUDE, rules)
+
+
 def load_prompt(stage: str, g2_overlap_mode: str | None = None) -> str:
-    """common.md + 단계 프롬프트 = 고정 지시 (6.2-1, 8.1). 주석은 지우고, G2는 모드 섹션 하나만."""
+    """common.md + 단계 프롬프트(+ rules.md 해석 규칙) = 고정 지시 (6.2-1, 8.1). 주석은 지우고, G2는 모드 섹션 하나만."""
     common = (PROMPT_DIR / "common.md").read_text(encoding="utf-8")
-    stage_text = (PROMPT_DIR / STAGE_FILES[stage][0]).read_text(encoding="utf-8")
+    stage_text = include_rules((PROMPT_DIR / STAGE_FILES[stage][0]).read_text(encoding="utf-8"), stage)
     if stage == "G2":
         if g2_overlap_mode is None:
             raise ValueError("G2 프롬프트에는 g2_overlap_mode가 필요하다")

@@ -39,6 +39,14 @@ PoC(2026-10-23, run 20261023-180904): G0 REGENERATE 26/30인데 Work는 재생�
 - M2 게이트 재정의(설계 13장): 템플릿 판정 0건 + 사람 판정 대비 재생성 과다 해소 + 재생성 Task가 원본보다 나빠지지 않음. 직무 기준 오판 0건은 M4(398행 전체)로 옮긴다.
 - 템플릿 감지는 차원별 evidence(설계상 evidence_loc 복사)를 대상에 넣지 않는다 (테스트로 확인).
 
+### 2026-10-26 결정 (2차 run 20261026-170739 평가 반영)
+- G0는 거의 통과(REGENERATE 11·KEEP 15·REVIEW_B 4, 사람 PASS 중 REGENERATE 8→2). 남은 문제는 G2: 사람 PASS 8행 중 최종 PASS 1행, 사람 REVIEW 22행 중 REVIEW 17행. G2 R 62건 = A 입력 자료 미기재 ~21 · B 프로필 범위 밖 미확인 ~20 · C 실제 설계 문제 후보 ~20.
+- 해석 규칙은 prompts/rules.md 하나로 빼서 G0·G2가 같이 쓴다(로더가 `<!-- stages: … -->` 표시로 단계별 줄을 고른다). G2에는 규칙 1·2·4·5, 규칙 3·6은 G0 전용. 규칙 1은 G2 task_clarity에도 적용("제공된 자료"로만 지칭하는 것은 결함 아님, 입력 최소 종류·필드는 reference_blueprint에서 판단).
+- 규칙 5 정답 유출: 표·섹션 구성 항목(분류명·열 이름·구분 체계)은 출력 명세, 유출은 정답 수치·결론값만. 규칙 6 재생성 시 원본의 구체 항목(분류명·과목명·처리 단계) 유지.
+- B 유형(프로필 범위 밖 미확인 → evaluation_alignment·deliverable_fit·b_coverage)은 규칙으로 바꾸지 않는다. 00 6.3 기준대로 두고 profile vs fulltext 비교로 확인.
+- 재실행: 같은 30행을 FILE_ACCESS=profile과 fulltext(FULLTEXT_MAX_TOKENS=30000, Task 폴더 fulltext.yaml을 --config로) 두 run으로. compare-runs는 run 여러 개(`--run 이름=run_id` 반복, 첫 run이 기준)를 받아 사람 판정 클래스별 일치·전부-REVIEW 기준선·G2 R 유형(A/B/C, 키워드 분류 근사)·b_coverage·REVIEW_B 변화·파일 입력(전문/프로필)·행당 토큰·비용을 낸다. C 유형 사례(task_0000012·030·031·033·035)는 `--mark "C 유형=…"`로 계속 추적.
+- 실제 run도 run 폴더에 03_final.jsonl 사본을 남긴다(추가 전용: 이미 있으면 03_final.<n>.jsonl). 03_results/03_final.jsonl은 최신 run 것. compare-runs는 run 폴더 사본을 읽는다.
+
 ### M1 결정 (2026-10-21)
 입력
 - 설계 5.1 그대로: Task 폴더의 `*_DataList.xlsx` 1개 + `01_output_files/`. Google Sheets 링크 입력은 구현하지 않는다.
@@ -103,7 +111,7 @@ Work 결과 비교 (M5)
 ## 저장소 구조
 ```
 criteria/      판정 기준 원문 (읽기 전용)
-prompts/       common.md, g0.md, g1b.md, g2.md, CHANGELOG.md
+prompts/       common.md, rules.md(해석 규칙, G0·G2 공용), g0.md, g1b.md, g2.md, CHANGELOG.md
 schemas/       g0.json, g1b.json, g2.json
 dictionaries/  criteria.yaml (부록 A), enums.yaml (7.5)
 ksco_qa/       config, p0, profiler, llm(client wrapper), stages(g0,g1a,g1b,g1c,g2), g3, compare, cli

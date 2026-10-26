@@ -1,13 +1,14 @@
-"""같은 표본을 두 번 돌린 run의 행별 비교표 (2026-10-26, M2 게이트 사람 검토용).
+"""같은 표본을 여러 번 돌린 run의 행별 비교표 (2026-10-26, M2 게이트 사람 검토용).
 
-이전 run과 새 run의 G0 action·차원별 R/F·재생성 Task, G1·G2·최종 상태를 행마다 나란히 놓고,
-Work 결과(사람 최종 판정·검수 메모)를 붙인다. 모델을 부르지 않고 run 폴더 기록만 읽는다.
-Work 결과 열은 비교에만 쓰고 모델 입력에는 넣지 않는다 (CLAUDE.md M1 결정).
+run마다 G0 action·차원별 R/F·재생성 Task, G1·G2·최종 상태, G2 R 유형(A/B/C), b_coverage, 파일 입력(전문/프로필),
+입력 토큰·비용을 나란히 놓고, Work 결과(사람 최종 판정·검수 메모)를 붙인다. 첫 run이 기준(이전)이다.
+모델을 부르지 않고 run 폴더 기록만 읽는다. Work 결과 열은 비교에만 쓰고 모델 입력에는 넣지 않는다 (CLAUDE.md M1 결정).
 """
 
 from __future__ import annotations
 
 import json
+import re
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -15,14 +16,30 @@ from typing import Any
 from openpyxl import Workbook
 
 from ksco_qa.compare import CompareError, WorkResultRow, load_work_result
-from ksco_qa.dictionaries import g0_check_keys
+from ksco_qa.dictionaries import g0_check_keys, g2_check_keys
+from ksco_qa.g3.export import FINAL_JSONL, final_copy_paths
 
-ROW_HEADERS = [
-    "source_row", "id", "job_leaf", "사람 AI 판정", "사람 최종 판정", "검수 메모", "Work Regenerate Task",
-    "이전 action", "새 action", "action 변경", "이전 R/F 수", "새 R/F 수", "이전 R/F 차원", "새 R/F 차원",
-    "이전 재판정", "새 재판정", "원본 Task", "이전 재생성 Task", "새 재생성 Task", "새 reason",
-    "이전 G1", "새 G1", "이전 G2", "새 G2", "이전 최종", "새 최종",
-]
+COMMON_HEADERS = ["source_row", "id", "job_leaf", "표시", "사람 AI 판정", "사람 최종 판정", "검수 메모",
+                  "Work Regenerate Task", "원본 Task"]
+RUN_FIELDS = ["G0 action", "G0 R/F 차원", "재판정", "재생성 Task", "G1", "G2", "G2 R 지표(유형)", "b_coverage",
+              "최종", "파일 입력", "입력 토큰(G0+G2)", "비용(G0+G2)"]
+
+# G2 R 유형 (2026-10-26 분석) — 키워드 분류라 근사값이다.
+# A: 입력 자료 미기재, B: 프로필 범위 밖 미확인(00 6.3 기준대로 둠), C: 그 밖(실제 설계 문제 후보)
+_INPUT_RE = re.compile(r"제공된 자료|입력 ?자료|원천 ?(자료|입력)|입력 계약|입력 파일|어떤 자료")
+_PROFILE_RE = re.compile(
+    r"(file_profile|file_fulltext|프로필|요약|관찰).{0,150}?"
+    r"(확인(할 수 없|되지 않|하지 못|해 주지 않|시킬 뿐)|대조할 수 없|뿐|만 (제공|제시|요약)|일부|축약|"
+    r"나타나지 않|포함되지 않|제시되지 않)"
+    r"|확인(할 수 없|되지 않|하지 못).{0,60}(file_profile|file_fulltext|프로필)")
+
+
+def classify_g2_issue(indicator: str, text: str) -> str:
+    if indicator == "input_contract" or (_INPUT_RE.search(text) and not _PROFILE_RE.search(text)):
+        return "A"
+    if _PROFILE_RE.search(text):
+        return "B"
+    return "C"
 
 
 def _jsonl(path: Path) -> list[dict[str, Any]]:
@@ -37,12 +54,13 @@ def _by_row(records: list[dict[str, Any]]) -> dict[int, dict[str, Any]]:
 
 
 def _final_records(run_dir: Path) -> dict[int, dict[str, Any]]:
-    """run 폴더의 03_final.jsonl, 없으면 03_results/03_final.jsonl 중 이 run이 내보낸 것."""
-    run_id = run_dir.name
-    for path in (run_dir / "03_final.jsonl", run_dir.parent.parent / "03_final.jsonl"):
-        records = _jsonl(path)
-        if records and f"run_id={run_id};" in str(records[0].get("final", {}).get("execution_notes")):
-            return _by_row(records)
+    """run 폴더의 03_final.jsonl 사본(가장 최근), 없으면 03_results/03_final.jsonl 중 이 run이 내보낸 것."""
+    copies = final_copy_paths(run_dir)
+    if copies:
+        return _by_row(_jsonl(copies[-1]))
+    records = _jsonl(run_dir.parent.parent / FINAL_JSONL)  # 사본을 남기기 전(2026-10-26 이전) run
+    if records and f"run_id={run_dir.name};" in str(records[0].get("final", {}).get("execution_notes")):
+        return _by_row(records)
     return {}
 
 
@@ -63,92 +81,169 @@ def load_run(run_dir: Path) -> dict[str, Any]:
     }
 
 
-def _flagged(g0_record: dict[str, Any] | None) -> list[str]:
-    checks = ((g0_record or {}).get("output") or {}).get("checks") or {}
+def _g0_flagged(record: dict[str, Any] | None) -> list[str]:
+    checks = ((record or {}).get("output") or {}).get("checks") or {}
     return [f"{key}:{checks[key]}" for key in g0_check_keys() if checks.get(key) in ("R", "F")]
 
 
-def _g0_value(g0_record: dict[str, Any] | None, key: str) -> Any:
-    return ((g0_record or {}).get("output") or {}).get(key)
+def g2_checks(record: dict[str, Any] | None) -> dict[str, str]:
+    out = (record or {}).get("output") or {}
+    return {**((out.get("overlap_review") or {}).get("checks") or {}), **(out.get("new_checks") or {})}
 
 
-def _status(run: dict[str, Any], stage: str, row: int) -> str | None:
-    if stage == "final":
-        return (run["final"].get(row) or {}).get("final", {}).get("status")
-    return (run[stage].get(row) or {}).get("status")
+def g2_flagged(record: dict[str, Any] | None) -> list[tuple[str, str, str]]:
+    """(지표, R|F, 유형) — R/F인 G2 지표마다 issues 문장으로 A/B/C를 붙인다."""
+    issues = ((record or {}).get("output") or {}).get("issues") or {}
+    checks = g2_checks(record)
+    return [(key, checks[key], classify_g2_issue(key, issues.get(key) or ""))
+            for key in g2_check_keys() if checks.get(key) in ("R", "F")]
 
 
-def build_run_comparison(old_dir: Path, new_dir: Path, work: dict[str, WorkResultRow]) -> dict[str, Any]:
-    old, new = load_run(old_dir), load_run(new_dir)
+def file_input(card: dict[str, Any]) -> str:
+    """fulltext 모드에서 원본 전문이 붙은 행과 크기 초과로 프로필만 쓴 행을 구분한다."""
+    if "file_fulltext_note" not in card:
+        return "프로필 모드"
+    notes = [n for n in str(card.get("file_fulltext_note") or "").split("; ") if n]
+    attached = sum("원본 전문 첨부" in n for n in notes)
+    if notes and attached == len(notes):
+        return "전문"
+    if attached:
+        return "일부 전문 (나머지 프로필)"
+    return "프로필 (크기 초과·미첨부)"
+
+
+def _row_usage(run: dict[str, Any], row: int) -> tuple[int, float]:
+    calls = [c for c in run["calls"] if c.get("stage") in ("G0", "G2") and str(c.get("unit_id")) == str(row)]
+    return (sum((c.get("usage") or {}).get("input") or 0 for c in calls),
+            round(sum(c.get("cost_usd") or 0 for c in calls), 6))
+
+
+def _run_row(run: dict[str, Any], row: int) -> dict[str, Any]:
+    g0 = run["g0"].get(row)
+    out = (g0 or {}).get("output") or {}
+    g2 = run["g2"].get(row)
+    tokens, cost = _row_usage(run, row)
+    card = run["cards"].get(row, {})
+    return {
+        "G0 action": (g0 or {}).get("action"),
+        "G0 R/F 차원": ", ".join(_g0_flagged(g0)),
+        "재판정": (g0 or {}).get("escalated"),
+        "재생성 Task": out.get("regenerated_task_new"),
+        "G1": (run["g1"].get(row) or {}).get("status"),
+        "G2": (g2 or {}).get("status"),
+        "G2 R 지표(유형)": ", ".join(f"{k}:{v}({t})" for k, v, t in g2_flagged(g2)),
+        "b_coverage": ((g2 or {}).get("output") or {}).get("b_coverage_status"),
+        "최종": (run["final"].get(row) or {}).get("final", {}).get("status"),
+        "파일 입력": file_input(card) if card else None,
+        "입력 토큰(G0+G2)": tokens,
+        "비용(G0+G2)": cost,
+    }
+
+
+def _class_recall(run: dict[str, Any], rows: list[dict[str, Any]], label: str) -> dict[str, Any]:
+    """전체 일치율은 다수 클래스(REVIEW)에 끌려가므로 사람 판정 클래스별로 본다."""
+    judged = [r for r in rows if r["사람 최종 판정"]]
+    if not run["final"]:
+        return {"사람 판정 대비 최종": "최종 기록 없음 (run 폴더 사본·이 run의 03_final.jsonl 없음)"}
+    out = {}
+    for c in sorted({r["사람 최종 판정"] for r in judged}):
+        members = [r for r in judged if r["사람 최종 판정"] == c]
+        out[f"사람 {c} 중 우리 {c}"] = f"{sum(r[f'{label} 최종'] == c for r in members)}/{len(members)}"
+    hits = sum(r[f"{label} 최종"] == r["사람 최종 판정"] for r in judged)
+    out["전체 일치"] = f"{hits}/{len(judged)} ({hits / len(judged):.0%})" if judged else None
+    return out
+
+
+def _run_summary(run: dict[str, Any], rows: list[dict[str, Any]], label: str) -> dict[str, Any]:
+    def counts(field: str) -> dict[str, int]:
+        return dict(Counter(r[f"{label} {field}"] for r in rows if r[f"{label} {field}"] is not None))
+
+    types = Counter(t for g2 in run["g2"].values() for _, _, t in g2_flagged(g2))
+    human_pass = [r for r in rows if r["사람 최종 판정"] == "PASS"]
+    total = run["report"].get("usage", {}).get("total", {})
+    n = len(rows) or 1
+    return {
+        "run_id": run["run_id"],
+        **_class_recall(run, rows, label),
+        "G0 action": counts("G0 action"),
+        "사람 최종 PASS 중 REGENERATE": sum(r[f"{label} G0 action"] == "REGENERATE" for r in human_pass),
+        "G0 재판정 호출": sum(c.get("stage") == "G0" and c.get("attempt_kind") == "escalate" for c in run["calls"]),
+        "G1": counts("G1"),
+        "G2": counts("G2"),
+        "G2 R 유형 A (입력 미기재)": types["A"],
+        "G2 R 유형 B (프로필 범위 밖)": types["B"],
+        "G2 R 유형 C (그 밖)": types["C"],
+        "b_coverage": counts("b_coverage"),
+        "최종": counts("최종"),
+        "파일 입력": counts("파일 입력"),
+        "입력 토큰 합계": total.get("input"),
+        "행당 입력 토큰": round(total["input"] / n) if total.get("input") is not None else None,
+        "비용 USD": total.get("cost_usd"),
+        "행당 비용 USD": round(total["cost_usd"] / n, 6) if total.get("cost_usd") is not None else None,
+        "템플릿 감지": run["report"].get("validation", {}).get("template_sentences"),
+    }
+
+
+def build_run_comparison(runs: list[tuple[str, Path]], work: dict[str, WorkResultRow],
+                         marks: dict[str, list[str]] | None = None) -> dict[str, Any]:
+    """runs = [(이름, run 폴더), …]. 첫 run이 기준. marks = {표시 이름: [id, …]} (예: "C 유형")."""
+    if len(runs) < 2:
+        raise CompareError("비교할 run이 둘 이상 필요하다")
+    loaded = [(label, load_run(path)) for label, path in runs]
+    mark_of: dict[str, list[str]] = {}
+    for name, ids in (marks or {}).items():
+        for row_id in ids:
+            mark_of.setdefault(row_id, []).append(name)
+    base = loaded[-1][1]
     rows = []
-    for row in sorted(new["g0"]):
-        n, o = new["g0"][row], old["g0"].get(row)
-        card = new["cards"].get(row, {})
-        w = work.get(n["id"])
-        old_flags, new_flags = _flagged(o), _flagged(n)
-        rows.append({
-            "source_row": row, "id": n["id"], "job_leaf": card.get("job_leaf"),
-            "사람 AI 판정": w.ai_verdict if w else None, "사람 최종 판정": w.final_verdict if w else None,
-            "검수 메모": w.review_memo if w else None, "Work Regenerate Task": w.regenerated_task if w else None,
-            "이전 action": (o or {}).get("action"), "새 action": n.get("action"),
-            "action 변경": (o or {}).get("action") != n.get("action"),
-            "이전 R/F 수": len(old_flags) if o else None, "새 R/F 수": len(new_flags),
-            "이전 R/F 차원": ", ".join(old_flags), "새 R/F 차원": ", ".join(new_flags),
-            "이전 재판정": (o or {}).get("escalated"), "새 재판정": n.get("escalated"),
-            "원본 Task": card.get("original_task"),
-            "이전 재생성 Task": _g0_value(o, "regenerated_task_new"), "새 재생성 Task": _g0_value(n, "regenerated_task_new"),
-            "새 reason": _g0_value(n, "reason") or n.get("rule_reason"),
-            "이전 G1": _status(old, "g1", row), "새 G1": _status(new, "g1", row),
-            "이전 G2": _status(old, "g2", row), "새 G2": _status(new, "g2", row),
-            "이전 최종": _status(old, "final", row), "새 최종": _status(new, "final", row),
-        })
+    for row in sorted(base["g0"]):
+        row_id = base["g0"][row]["id"]
+        card = base["cards"].get(row, {})
+        w = work.get(row_id)
+        r = {"source_row": row, "id": row_id, "job_leaf": card.get("job_leaf"), "표시": ", ".join(mark_of.get(row_id, [])),
+             "사람 AI 판정": w.ai_verdict if w else None, "사람 최종 판정": w.final_verdict if w else None,
+             "검수 메모": w.review_memo if w else None, "Work Regenerate Task": w.regenerated_task if w else None,
+             "원본 Task": card.get("original_task")}
+        for label, run in loaded:
+            r.update({f"{label} {k}": v for k, v in _run_row(run, row).items()})
+        rows.append(r)
 
     dimensions = []
-    for key in g0_check_keys():
-        counts = {}
-        for label, run in (("이전", old), ("새", new)):
-            values = Counter(((r.get("output") or {}).get("checks") or {}).get(key) for r in run["g0"].values())
-            counts[f"{label} R"], counts[f"{label} F"] = values["R"], values["F"]
-        dimensions.append({"차원": key, **counts})
+    for stage, keys in (("G0", g0_check_keys()), ("G2", g2_check_keys())):
+        for key in keys:
+            d = {"단계": stage, "지표": key}
+            for label, run in loaded:
+                if stage == "G0":
+                    values = Counter(((g.get("output") or {}).get("checks") or {}).get(key) for g in run["g0"].values())
+                else:
+                    values = Counter(g2_checks(g).get(key) for g in run["g2"].values())
+                d[f"{label} R"], d[f"{label} F"] = values["R"], values["F"]
+            dimensions.append(d)
 
-    def counts(column: str) -> dict[str, int]:
-        return dict(Counter(r[column] for r in rows if r[column] is not None))
-
-    human_pass = [r for r in rows if r["사람 최종 판정"] == "PASS"]
+    summary: dict[str, dict[str, Any]] = {}
+    for label, run in loaded:
+        for metric, value in _run_summary(run, rows, label).items():
+            summary.setdefault(metric, {})[label] = value
     judged = [r for r in rows if r["사람 최종 판정"]]
-    classes = sorted({r["사람 최종 판정"] for r in judged})
-    class_recall = {}  # 전체 일치율은 다수 클래스(REVIEW)에 끌려가므로 클래스별로 본다 (2026-10-26)
-    for label, column, run in (("이전", "이전 최종", old), ("새", "새 최종", new)):
-        if not run["final"]:  # 03_final.jsonl이 다른 run에 덮어써졌으면 비교할 수 없다
-            class_recall[f"사람 판정 대비 최종 ({label})"] = "최종 기록 없음 (03_final.jsonl이 이 run 것이 아님)"
-            continue
-        for c in classes:
-            members = [r for r in judged if r["사람 최종 판정"] == c]
-            class_recall[f"사람 {c} 중 우리 {c} ({label})"] = f"{sum(r[column] == c for r in members)}/{len(members)}"
-        hits = sum(r[column] == r["사람 최종 판정"] for r in judged)
-        class_recall[f"전체 일치 ({label})"] = f"{hits}/{len(judged)} ({hits / len(judged):.0%})" if judged else None
-    for c in classes:
+    for c in sorted({r["사람 최종 판정"] for r in judged}):
         n = sum(r["사람 최종 판정"] == c for r in judged)
-        class_recall[f"기준선: 전부 {c}로 답하면 전체 일치"] = f"{n}/{len(judged)} ({n / len(judged):.0%})"
-    summary = {
-        "이전 run": old["run_id"], "새 run": new["run_id"], "행 수": len(rows),
-        "이전 action": counts("이전 action"), "새 action": counts("새 action"),
-        "action 바뀐 행": sum(r["action 변경"] for r in rows),
-        "Work Regenerate Task 있는 행": sum(bool(r["Work Regenerate Task"]) for r in rows),
-        "사람 최종 PASS 행": len(human_pass),
-        "사람 최종 PASS 중 REGENERATE (이전)": sum(r["이전 action"] == "REGENERATE" for r in human_pass),
-        "사람 최종 PASS 중 REGENERATE (새)": sum(r["새 action"] == "REGENERATE" for r in human_pass),
-        "G0 재판정 호출 (이전)": sum(c.get("stage") == "G0" and c.get("attempt_kind") == "escalate" for c in old["calls"]),
-        "G0 재판정 호출 (새)": sum(c.get("stage") == "G0" and c.get("attempt_kind") == "escalate" for c in new["calls"]),
-        "이전 G1": counts("이전 G1"), "새 G1": counts("새 G1"),
-        "이전 G2": counts("이전 G2"), "새 G2": counts("새 G2"),
-        "이전 최종": counts("이전 최종"), "새 최종": counts("새 최종"),
-        **class_recall,
-        "이전 비용 USD": old["report"].get("usage", {}).get("total", {}).get("cost_usd"),
-        "새 비용 USD": new["report"].get("usage", {}).get("total", {}).get("cost_usd"),
-        "새 템플릿 감지": new["report"].get("validation", {}).get("template_sentences"),
-    }
-    return {"rows": rows, "dimensions": dimensions, "summary": summary}
+        summary[f"기준선: 전부 {c}로 답하면 전체 일치"] = {label: f"{n}/{len(judged)} ({n / len(judged):.0%})"
+                                                for label, _ in loaded}
+    review_b_ids = [r["id"] for r in rows if any(r[f"{label} G0 action"] == "REVIEW_B" for label, _ in loaded)]
+    for r in rows:
+        if r["id"] in review_b_ids:
+            summary[f"REVIEW_B 변화: {r['id']}"] = {label: f"{r[f'{label} G0 action']} / {r[f'{label} 파일 입력']}"
+                                                   for label, _ in loaded}
+    for name, ids in (marks or {}).items():
+        for r in rows:
+            if r["id"] in ids:
+                summary[f"{name}: {r['id']}"] = {label: f"G2 {r[f'{label} G2']} · {r[f'{label} G2 R 지표(유형)']}"
+                                               for label, _ in loaded}
+    # 사람 판정 대비 지표와 기준선을 run_id 바로 아래에 모은다
+    top = ("사람 판정", "사람 PASS", "사람 REVIEW", "사람 FAIL", "전체 일치", "기준선")
+    first = ["run_id"] + [k for k in summary if k.startswith(top)]
+    summary = {k: summary[k] for k in first + [k for k in summary if k not in first]}
+    return {"labels": [label for label, _ in loaded], "rows": rows, "dimensions": dimensions, "summary": summary}
 
 
 def _cell(value: Any) -> Any:
@@ -158,30 +253,52 @@ def _cell(value: Any) -> Any:
 
 
 def write_run_comparison_xlsx(path: Path, comparison: dict[str, Any]) -> Path:
+    labels = comparison["labels"]
     workbook = Workbook()
-    sheet = workbook.active
-    sheet.title = "행별"
-    sheet.append(ROW_HEADERS)
+    summary = workbook.active
+    summary.title = "요약"
+    summary.append(["지표", *labels])
+    for metric, values in comparison["summary"].items():
+        summary.append([metric, *(_cell(values.get(label)) for label in labels)])
+    summary.append([])
+    summary.append(["G2 R 유형은 issues 문장 키워드 분류(근사): A 입력 자료 미기재 · B 프로필 범위 밖 미확인 · C 그 밖"])
+    sheet = workbook.create_sheet("행별")
+    headers = COMMON_HEADERS + [f"{label} {field}" for field in RUN_FIELDS for label in labels]
+    sheet.append(headers)
     for row in comparison["rows"]:
-        sheet.append([_cell(row[h]) for h in ROW_HEADERS])
-    dims = workbook.create_sheet("차원별 RF")
-    headers = ["차원", "이전 R", "이전 F", "새 R", "새 F"]
+        sheet.append([_cell(row.get(h)) for h in headers])
+    dims = workbook.create_sheet("지표별 RF")
+    headers = ["단계", "지표"] + [f"{label} {k}" for label in labels for k in ("R", "F")]
     dims.append(headers)
     for row in comparison["dimensions"]:
         dims.append([row[h] for h in headers])
-    summary = workbook.create_sheet("요약")
-    for key, value in comparison["summary"].items():
-        summary.append([key, _cell(value)])
     path = Path(path)
     workbook.save(path)
     return path
 
 
-def compare_runs(task_folder: Path, old_run: str, new_run: str, work_result: Path, out: Path | None = None) -> Path:
+def parse_run_option(value: str) -> tuple[str, str]:
+    """"이름=run_id" 또는 "run_id"."""
+    label, _, run_id = value.partition("=")
+    return (label.strip(), run_id.strip()) if run_id else (value.strip(), value.strip())
+
+
+def parse_mark_option(value: str) -> tuple[str, list[str]]:
+    """"C 유형=task_0000012,task_0000030"."""
+    name, _, ids = value.partition("=")
+    if not ids:
+        raise CompareError(f"--mark는 '이름=id,id' 형식이어야 한다: {value}")
+    return name.strip(), [i.strip() for i in ids.split(",") if i.strip()]
+
+
+def compare_runs(task_folder: Path, runs: list[str], work_result: Path, out: Path | None = None,
+                 marks: list[str] | None = None) -> Path:
     work_root = Path(task_folder) / "03_results" / "_work"
-    old_dir, new_dir = work_root / old_run, work_root / new_run
-    for run_dir in (old_dir, new_dir):
-        if not run_dir.is_dir():
-            raise CompareError(f"run 폴더가 없다: {run_dir}")
-    comparison = build_run_comparison(old_dir, new_dir, load_work_result(work_result))
-    return write_run_comparison_xlsx(out or new_dir / f"compare_vs_{old_run}.xlsx", comparison)
+    parsed = [parse_run_option(r) for r in runs]
+    for _, run_id in parsed:
+        if not (work_root / run_id).is_dir():
+            raise CompareError(f"run 폴더가 없다: {work_root / run_id}")
+    comparison = build_run_comparison([(label, work_root / run_id) for label, run_id in parsed],
+                                      load_work_result(work_result), dict(parse_mark_option(m) for m in marks or []))
+    default = work_root / parsed[-1][1] / f"compare_{len(parsed)}runs.xlsx"
+    return write_run_comparison_xlsx(out or default, comparison)

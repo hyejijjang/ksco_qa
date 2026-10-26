@@ -15,6 +15,22 @@ prompt_version은 단계 프롬프트 + common + 스키마 + 기준 발췌를 �
 - 평가셋 결과: (이전 → 이후)
 ```
 
+## 2026-10-26 g0-v3 · g2-v2 rules.md 공용화, 규칙 5·6, G2에 해석 규칙 적용 (G0·G2)
+- 변경: 해석 규칙을 prompts/rules.md로 빼서 g0.md·g2.md가 `<!-- include rules.md -->`로 같이 쓴다 (같은 규칙을 두 번 쓰지 않음).
+  규칙마다 `<!-- stages: … -->`로 적용 단계를 표시. G2에는 겹치는 지표 규칙 1(input_contract)·2(grounding)·4(output_specification)·5(answer_leakage)만,
+  규칙 3(action)·6(재생성 작성)과 G0 전용 문장(expected_reference_spec, REVIEW_B 검토)은 G0만.
+  **00에 없는 팀 해석** 추가:
+  5. 정답 유출(G0 no_answer_leakage, G2 answer_leakage): 표·섹션 구성 항목(분류명, 열 이름, 구분 체계)을 Task에 적는 것은 출력 명세이고, 유출은 정답 수치·결론값(합계 금액, 비율 결과, 판정 결론 등)을 미리 적는 경우만.
+  6. REGENERATE 시 원본 Task의 구체 항목(file_profile에서 확인되거나 모순되지 않는 분류명·과목명·처리 단계)은 유지하고 결함 부분만 고친다. "제공된 자료의 항목" 같은 일반 표현으로 바꾸지 않는다.
+  규칙 1 G2 보충: task_clarity에도 적용 — Task가 입력을 "제공된 자료"로만 지칭하는 것은 결함이 아님(G0 금지 조건이 그렇게 쓰라고 한 표현). 입력 최소 종류·필드는 reference_blueprint에서 판단.
+  B 유형(프로필 범위 밖 미확인 → evaluation_alignment·deliverable_fit·b_coverage)은 규칙으로 바꾸지 않음 (00 6.3 기준대로).
+- 이유: 2차 run(20261026-170739, g0 ed7685d23e7df226)에서 G0는 거의 통과(REGENERATE 11·KEEP 15·REVIEW_B 4, 사람 PASS 중 REGENERATE 2).
+  task_0000015는 업종 분류 나열을 no_answer_leakage F로 봐서 재생성 Task가 막연해짐(사람 PASS). task_0000008·0000011은 재생성에서 구체 항목이 빠지고 0000011은 "배분" 처리가 사라짐.
+  G2: 사람 PASS 8행 중 최종 PASS 1행 — task_0000016·18·20·22는 G0 KEEP인데 G2 REVIEW. G2 R 62건(F 0) 중 A 입력 자료 미기재 ~21(input_contract 14건 전부, G2가 G0의 P를 R로 뒤집은 것 8건),
+  B 프로필 범위 밖 미확인 ~20, C 실제 설계 문제 후보 ~20(task_0000012·030·031·033·035).
+- 평가셋 결과: (이전 → 이후) 같은 30행을 profile·fulltext 두 run으로 재실행 후 `ksco-qa compare-runs`로 기록 예정.
+  이전(20261026-170739): 사람 PASS 중 PASS 1/8, 사람 REVIEW 중 REVIEW 17/22(전부-REVIEW 기준선 22/30=73%), 행당 입력 12,454토큰·$0.0029.
+
 ## 2026-10-26 g0-v2 ②·③ (common / G0, file_profile)
 - 변경 ② 프롬프트 공백 채우기 (00 원문 발췌):
   common.md를 00_Work_Run.md 원문으로 채움 — 0장 역할 문단, 1장 최종 Agent 제약·절대 금지, 2장 원칙 1~8, 3.2 Reference 분기.

@@ -101,3 +101,29 @@ def test_g0_prompt_has_no_work_markers_and_keeps_rules_separate() -> None:
     criteria, rows = text.split("## 행 단위 지시", 1)
     assert "### 해석 규칙" in rows and "해석 규칙" not in criteria
     assert "REGENERATE 작성 금지 조건" in rows
+
+
+def test_rules_are_shared_and_selected_by_stage() -> None:
+    """rules.md 하나를 g0·g2가 같이 쓴다. G2에는 규칙 1·2·4·5만, 규칙 3·6과 G0 전용 문장은 G0에만 (2026-10-26)."""
+    g0, g2 = load_prompt("G0"), load_prompt("G2", "AGREE_CHECK")
+    for text in (g0, g2):
+        assert text.count("### 해석 규칙") == 1 and "stages:" not in text and "include rules.md" not in text
+        for rule in ("1. input_contract", "2. grounding", "4. output_specification", "5. 정답 유출"):
+            assert rule in text
+    assert "3. KEEP을 막는 것은 F뿐이다" in g0 and "3. KEEP을 막는 것은" not in g2
+    assert "6. REGENERATE 시 원본 Task에 있던 구체 항목" in g0 and "6. REGENERATE 시" not in g2
+    assert "expected_reference_spec에 쓴다" in g0.split("### 해석 규칙")[1].split("###")[0]
+    assert "REVIEW_B를 검토한다" not in g2 and "task_clarity에도 적용한다" in g2 and "task_clarity에도" not in g0
+    assert "해석 규칙" not in load_prompt("G1B")
+
+
+def test_select_rules_markers(prompt_dir: Path) -> None:
+    rules = "<!-- 머리 -->\n### 규칙\n<!-- stages: G0 G2 -->\n1. 공통\n<!-- stages: G0 -->\n   G0만\n<!-- stages: G2 -->\n   G2만\n"
+    assert client.select_rules(rules, "G0") == "### 규칙\n1. 공통\n   G0만\n"
+    assert client.select_rules(rules, "G2") == "### 규칙\n1. 공통\n   G2만\n"
+    (prompt_dir / "rules.md").write_text(rules, encoding="utf-8")
+    (prompt_dir / "g0.md").write_text("## 행 단위 지시\n<!-- include rules.md -->\n끝\n", encoding="utf-8")
+    base = prompt_version("G0")
+    assert "1. 공통\n   G0만" in load_prompt("G0") and "G2만" not in load_prompt("G0")
+    (prompt_dir / "rules.md").write_text(rules.replace("   G2만", "   G2만 수정"), encoding="utf-8")
+    assert prompt_version("G0") == base  # G0에 안 가는 줄만 바뀜 → 같은 버전

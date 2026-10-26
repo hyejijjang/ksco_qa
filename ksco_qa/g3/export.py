@@ -10,6 +10,7 @@ import csv
 import hashlib
 import json
 import random
+import shutil
 from collections import Counter
 from datetime import date
 from pathlib import Path
@@ -643,6 +644,26 @@ def write_run_report(path: Path, report: dict[str, Any]) -> None:
     path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def final_copy_paths(run_dir: Path) -> list[Path]:
+    """run 폴더의 03_final.jsonl 사본, 오래된 것부터 (03_final.jsonl, 03_final.2.jsonl, …)."""
+    def number(path: Path) -> int:
+        middle = path.name[len("03_final."):-len(".jsonl")]
+        return int(middle) if middle.isdigit() else 1
+    paths = [p for p in Path(run_dir).glob("03_final*.jsonl")
+             if p.name == FINAL_JSONL or p.name[len("03_final."):-len(".jsonl")].isdigit()]
+    return sorted(paths, key=number)
+
+
+def archive_final_jsonl(run_dir: Path, source: Path) -> Path:
+    """03_results/03_final.jsonl의 사본을 run 폴더에 남긴다. 추가 전용: 이미 있으면 03_final.<n>.jsonl로 (2026-10-26)."""
+    target, n = Path(run_dir) / FINAL_JSONL, 1
+    while target.exists():
+        n += 1
+        target = Path(run_dir) / f"03_final.{n}.jsonl"
+    shutil.copyfile(source, target)
+    return target
+
+
 def run_g3(ctx: Any, cfg: Config, prompt_versions: dict[str, str], *, source_file: str) -> dict[str, Any]:
     """5.7 전체: 레코드 → Gate xlsx·03_final.jsonl → 검증 → review_queue·run_report.
     검증 실패가 하나라도 있으면 status=FAILED_VALIDATION (파일은 남김)."""
@@ -655,6 +676,9 @@ def run_g3(ctx: Any, cfg: Config, prompt_versions: dict[str, str], *, source_fil
     results = {name: ctx.result_path(name) for name in FINAL_OUTPUTS}
     write_gate_files(results, records)
     write_final_jsonl(results[FINAL_JSONL], records)
+    final_copy = None
+    if Path(results[FINAL_JSONL]).parent.resolve() != Path(ctx.run_dir).resolve():
+        final_copy = archive_final_jsonl(ctx.run_dir, results[FINAL_JSONL])
     sheet_paste = write_sheet_paste(
         results[SHEET_PASTE], ctx.task_folder, records,
         overwrite_existing=cfg.OVERWRITE_EXISTING_REVIEW,
@@ -683,6 +707,7 @@ def run_g3(ctx: Any, cfg: Config, prompt_versions: dict[str, str], *, source_fil
         "review_queue": {"rows": len(queue), "seed": f"{review_seed(ctx.run_id):016x}"},
         "usage": calls_summary(ctx.run_dir),
         "outputs": {name: str(Path(p).name) for name, p in results.items() if Path(p).is_file()},
+        "final_copy": final_copy.name if final_copy else None,
     }
     write_run_report(ctx.run_dir / "run_report.json", report)
     return report

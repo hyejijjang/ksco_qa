@@ -396,3 +396,19 @@ def test_failed_validation_sets_status(g3_run, monkeypatch: pytest.MonkeyPatch) 
     report = run_g3(ctx, Config(), {}, source_file="x.xlsx")
     assert report["status"] == "FAILED_VALIDATION"
     assert report["validation"]["all_null_fields"] == ["duplicate.overlap_status가 전 행 null"]
+
+
+def test_archive_final_jsonl_is_append_only(tmp_path: Path) -> None:
+    """실제 run은 03_results/03_final.jsonl을 덮어쓰므로 run 폴더에 사본을 남긴다. 다시 내보내면 새 번호 (2026-10-26)."""
+    from ksco_qa.g3.export import archive_final_jsonl, final_copy_paths
+    run_dir, source = tmp_path / "run", tmp_path / "03_final.jsonl"
+    run_dir.mkdir()
+    source.write_text('{"v": 1}\n', encoding="utf-8")
+    first = archive_final_jsonl(run_dir, source)
+    source.write_text('{"v": 2}\n', encoding="utf-8")
+    second = archive_final_jsonl(run_dir, source)
+    assert (first.name, second.name) == ("03_final.jsonl", "03_final.2.jsonl")
+    assert first.read_text(encoding="utf-8") == '{"v": 1}\n'  # 이전 사본은 그대로
+    (run_dir / "03_final.10.jsonl").write_text("x", encoding="utf-8")
+    (run_dir / "03_final.bak.jsonl").write_text("x", encoding="utf-8")  # 번호가 아닌 파일은 사본이 아니다
+    assert [p.name for p in final_copy_paths(run_dir)] == ["03_final.jsonl", "03_final.2.jsonl", "03_final.10.jsonl"]

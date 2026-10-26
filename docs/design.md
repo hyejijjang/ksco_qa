@@ -431,7 +431,8 @@ KSCO-34 첫 실행에서 나온 DESIGNABLE처럼 사전에 없는 값은 스키�
 | 파일 | 내용 | 쓰는 곳 |
 |---|---|---|
 | criteria/00_Work_Run.md, criteria/06_Result_Schema.md | 판정 기준 원문 (수정하지 않음) | 발췌의 원천 |
-| prompts/common.md | 역할, 절대 규칙, 출력 다이어트, 직무 기준 경고 | G0·G1b·G2 공통 앞부분 |
+| prompts/common.md | 00 원문 발췌: 0장 역할, 1장 최종 Agent 제약·절대 금지, 2장 원칙 1~8, 3.2 Reference 분기 (2026-10-26) | G0·G1b·G2 공통 앞부분 |
+| prompts/rules.md | 해석 규칙 — 00에 없는 팀 해석. 규칙마다 적용 단계 표시(G2에는 겹치는 지표 규칙 1·2·4·5만) (2026-10-26) | G0·G2 (`<!-- include rules.md -->` 자리) |
 | prompts/g0.md | 4장 발췌 + 행 단위 지시 | G0 |
 | prompts/g1b.md | 5.2 발췌 + 쌍 단위 지시 | G1b |
 | prompts/g2.md | 6장 발췌 + 겹치는 지표 처리 모드별 지시 | G2 |
