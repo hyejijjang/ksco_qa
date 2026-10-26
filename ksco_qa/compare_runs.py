@@ -115,6 +115,21 @@ def build_run_comparison(old_dir: Path, new_dir: Path, work: dict[str, WorkResul
         return dict(Counter(r[column] for r in rows if r[column] is not None))
 
     human_pass = [r for r in rows if r["사람 최종 판정"] == "PASS"]
+    judged = [r for r in rows if r["사람 최종 판정"]]
+    classes = sorted({r["사람 최종 판정"] for r in judged})
+    class_recall = {}  # 전체 일치율은 다수 클래스(REVIEW)에 끌려가므로 클래스별로 본다 (2026-10-26)
+    for label, column, run in (("이전", "이전 최종", old), ("새", "새 최종", new)):
+        if not run["final"]:  # 03_final.jsonl이 다른 run에 덮어써졌으면 비교할 수 없다
+            class_recall[f"사람 판정 대비 최종 ({label})"] = "최종 기록 없음 (03_final.jsonl이 이 run 것이 아님)"
+            continue
+        for c in classes:
+            members = [r for r in judged if r["사람 최종 판정"] == c]
+            class_recall[f"사람 {c} 중 우리 {c} ({label})"] = f"{sum(r[column] == c for r in members)}/{len(members)}"
+        hits = sum(r[column] == r["사람 최종 판정"] for r in judged)
+        class_recall[f"전체 일치 ({label})"] = f"{hits}/{len(judged)} ({hits / len(judged):.0%})" if judged else None
+    for c in classes:
+        n = sum(r["사람 최종 판정"] == c for r in judged)
+        class_recall[f"기준선: 전부 {c}로 답하면 전체 일치"] = f"{n}/{len(judged)} ({n / len(judged):.0%})"
     summary = {
         "이전 run": old["run_id"], "새 run": new["run_id"], "행 수": len(rows),
         "이전 action": counts("이전 action"), "새 action": counts("새 action"),
@@ -128,6 +143,7 @@ def build_run_comparison(old_dir: Path, new_dir: Path, work: dict[str, WorkResul
         "이전 G1": counts("이전 G1"), "새 G1": counts("새 G1"),
         "이전 G2": counts("이전 G2"), "새 G2": counts("새 G2"),
         "이전 최종": counts("이전 최종"), "새 최종": counts("새 최종"),
+        **class_recall,
         "이전 비용 USD": old["report"].get("usage", {}).get("total", {}).get("cost_usd"),
         "새 비용 USD": new["report"].get("usage", {}).get("total", {}).get("cost_usd"),
         "새 템플릿 감지": new["report"].get("validation", {}).get("template_sentences"),

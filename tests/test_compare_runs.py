@@ -66,6 +66,25 @@ def test_run_comparison_rows_dimensions_and_summary(tmp_path: Path) -> None:
     assert s["새 G1"] == {"UNIQUE": 1, "REVIEW": 1}
 
 
+def test_summary_class_recall_and_all_review_baseline(tmp_path: Path) -> None:
+    """클래스별 일치(사람 PASS 중 우리 PASS 등)와 '전부 REVIEW' 기준선을 요약에 함께 둔다."""
+    old, new = tmp_path / "_work" / "old", tmp_path / "_work" / "new"
+    _write_run(old, [_g0(row, "KEEP") for row in (2, 3, 4, 5)])
+    _write_run(new, [_g0(row, "KEEP") for row in (2, 3, 4, 5)])
+    finals = {2: "PASS", 3: "REVIEW", 4: "REVIEW", 5: "REVIEW"}
+    (new / "03_final.jsonl").write_text("".join(
+        json.dumps({"source_row": row, "id": f"T-{row}",
+                    "final": {"status": status, "execution_notes": "API 파이프라인; run_id=new; G0=m"}}) + "\n"
+        for row, status in finals.items()), encoding="utf-8")
+    human = {2: "PASS", 3: "PASS", 4: "REVIEW", 5: "REVIEW"}
+    work = {f"T-{row}": WorkResultRow(f"T-{row}", None, verdict, None, None, None) for row, verdict in human.items()}
+    s = build_run_comparison(old, new, work)["summary"]
+    assert s["사람 PASS 중 우리 PASS (새)"] == "1/2" and s["사람 REVIEW 중 우리 REVIEW (새)"] == "2/2"
+    assert s["전체 일치 (새)"] == "3/4 (75%)" and "사람 PASS 중 우리 PASS (이전)" not in s
+    assert s["사람 판정 대비 최종 (이전)"].startswith("최종 기록 없음")  # 이전 run은 03_final.jsonl이 없다
+    assert s["기준선: 전부 REVIEW로 답하면 전체 일치"] == "2/4 (50%)"
+
+
 def test_compare_runs_writes_workbook(tmp_path: Path) -> None:
     work_root = tmp_path / "task" / "03_results" / "_work"
     _write_run(work_root / "r1", [_g0(2, "REGENERATE", "옛 Task")])
